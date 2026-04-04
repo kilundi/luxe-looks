@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(npm run:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(node server.js)",
+      "Bash(node:*)",
+      "Bash(curl -s http://localhost:3001/api/products)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(chmod +x:*)",
+      "Bash(pkill -f \"node.*server.js\")",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(curl -s http://localhost:3000/api/products)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(curl -I http://localhost:3000/main.tsx)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(npm start:*)",
+      "Bash(PORT=5173 npm run dev)",
+      "Bash(timeout 5 cat:*)",
+      "Bash(findstr \":3001\")",
+      "Bash(curl:*)",
+      "Bash(taskkill /F /IM node.exe)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :3001)",
+      "Bash(taskkill:*)",
+      "Bash(2>&1)",
+      "Bash(powershell:*)",
+      "Bash(tasklist)",
+      "Bash(findstr node.exe)",
+      "Bash(findstr LISTENING)",
+      "Bash(findstr \":300[0-9]\")",
+      "Bash(findstr \"vite\\\\|node\")",
+      "Bash(findstr \"26000\\\\|24056\")",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

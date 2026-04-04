@@ -1,0 +1,301 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Upload, Image as ImageIcon } from 'lucide-react';
+import { useDropzone } from 'react-dropzone';
+import { Button } from '@/components/ui/Button';
+import { useProductStore } from '@/store/useProductStore';
+import { productService } from '@/services/api';
+import type { Product } from '@/types';
+import toast from 'react-hot-toast';
+
+interface ProductFormProps {
+  product?: Product | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export const ProductForm: React.FC<ProductFormProps> = ({
+  product,
+  isOpen,
+  onClose,
+  onSuccess,
+}) => {
+  const { addProduct, updateProduct } = useProductStore();
+  const [formData, setFormData] = useState({
+    name: '',
+    category: '',
+    price: '',
+    description: '',
+    rating: 4.0,
+    reviews: 0,
+  });
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: { 'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp'] },
+    maxFiles: 1,
+    maxSize: 5 * 1024 * 1024, // 5MB
+    onDrop: (acceptedFiles) => {
+      const file = acceptedFiles[0];
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onload = (e) => setImagePreview(e.target?.result as string);
+      reader.readAsDataURL(file);
+    },
+  });
+
+  useEffect(() => {
+    if (product) {
+      setFormData({
+        name: product.name,
+        category: product.category,
+        price: product.price,
+        description: product.description || '',
+        rating: product.rating,
+        reviews: product.reviews,
+      });
+      if (product.image) {
+        setImagePreview(product.image.startsWith('http') ? product.image : `http://localhost:3001${product.image}`);
+      }
+    } else {
+      setFormData({
+        name: '',
+        category: '',
+        price: '',
+        description: '',
+        rating: 4.0,
+        reviews: 0,
+      });
+      setImageFile(null);
+      setImagePreview(null);
+    }
+  }, [product]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append('name', formData.name);
+      formDataToSend.append('category', formData.category);
+      formDataToSend.append('price', formData.price);
+      formDataToSend.append('description', formData.description);
+      formDataToSend.append('rating', String(formData.rating));
+      formDataToSend.append('reviews', String(formData.reviews));
+      if (imageFile) {
+        formDataToSend.append('image', imageFile);
+      }
+
+      if (product) {
+        await productService.update(product.id, formDataToSend);
+        toast.success('Product updated successfully!');
+      } else {
+        await productService.create(formDataToSend);
+        toast.success('Product created successfully!');
+      }
+
+      onSuccess();
+      onClose();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to save product');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          className="bg-dark-900 border border-dark-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between p-6 border-b border-dark-800">
+            <h2 className="text-2xl font-bold text-white">
+              {product ? 'Edit Product' : 'Add New Product'}
+            </h2>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-dark-800 text-dark-400 transition-colors"
+            >
+              <X size={24} />
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="label">Product Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="input"
+                  placeholder="Enter product name"
+                />
+              </div>
+
+              <div>
+                <label className="label">Category *</label>
+                <select
+                  required
+                  value={formData.category}
+                  onChange={(e) =>
+                    setFormData({ ...formData, category: e.target.value })
+                  }
+                  className="select"
+                >
+                  <option value="">Select category</option>
+                  <option value="Fragrances">Fragrances</option>
+                  <option value="Beauty">Beauty</option>
+                  <option value="Hair">Hair</option>
+                  <option value="Bags">Bags</option>
+                  <option value="Watches">Watches</option>
+                  <option value="Jewelry">Jewelry</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="label">Price *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.price}
+                  onChange={(e) =>
+                    setFormData({ ...formData, price: e.target.value })
+                  }
+                  className="input"
+                  placeholder="e.g., KSh 4,500"
+                />
+              </div>
+
+              <div>
+                <label className="label">Rating (0-5)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="5"
+                  step="0.1"
+                  value={formData.rating}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      rating: parseFloat(e.target.value),
+                    })
+                  }
+                  className="input"
+                />
+              </div>
+
+              <div>
+                <label className="label">Reviews Count</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.reviews}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      reviews: parseInt(e.target.value) || 0,
+                    })
+                  }
+                  className="input"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="label">Description</label>
+              <textarea
+                rows={4}
+                value={formData.description}
+                onChange={(e) =>
+                  setFormData({ ...formData, description: e.target.value })
+                }
+                className="input"
+                placeholder="Enter product description"
+              />
+            </div>
+
+            <div>
+              <label className="label">Product Image</label>
+              <div
+                {...getRootProps()}
+                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                  isDragActive
+                    ? 'border-primary-500 bg-primary-500/10'
+                    : 'border-dark-700 hover:border-dark-600'
+                }`}
+              >
+                <input {...getInputProps()} />
+                {imagePreview ? (
+                  <div className="relative">
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      className="max-h-48 mx-auto rounded-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setImageFile(null);
+                        setImagePreview(null);
+                      }}
+                      className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="mx-auto h-12 w-12 text-dark-500 mb-3" />
+                    <p className="text-sm text-dark-400">
+                      Drag & drop an image here, or click to select
+                    </p>
+                    <p className="text-xs text-dark-500 mt-1">
+                      PNG, JPG, GIF, WebP up to 5MB
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-4 pt-4 border-t border-dark-800">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onClose}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" isLoading={isSubmitting}>
+                {product ? 'Update Product' : 'Create Product'}
+              </Button>
+            </div>
+          </form>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};

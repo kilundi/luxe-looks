@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply font-sans text-gray-900 bg-white;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif;
+  }
+}
+
+@layer components {
+  /* Premium Button Styles */
+  .btn-primary {
+    @apply bg-primary text-white px-8 py-4 font-semibold tracking-wide uppercase transition-all duration-300 hover:bg-yellow-600 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5;
+  }
+
+  .btn-secondary {
+    @apply border-2 border-primary text-primary px-8 py-4 font-semibold tracking-wide uppercase transition-all duration-300 hover:bg-primary hover:text-white;
+  }
+
+  .btn-glass {
+    @apply bg-white/10 backdrop-blur-glass border border-white/20 px-6 py-3 text-white font-medium transition-all duration-300 hover:bg-white/20;
+  }
+
+  /* Glassmorphism Utilities */
+  .glass {
+    @apply bg-white/10 backdrop-blur-glass border border-white/20;
+  }
+
+  .glass-dark {
+    @apply bg-secondary/80 backdrop-blur-glass border border-secondary/40;
+  }
+
+  /* Gold Border Utility */
+  .border-gold {
+    @apply border-2 border-primary;
+  }
+
+  /* Text Gold */
+  .text-gold {
+    @apply text-primary;
+  }
+
+  /* Product Card Styles */
+  .product-card {
+    @apply relative overflow-hidden rounded-2xl shadow-lg transition-all duration-500 hover:shadow-2xl hover:scale-105 bg-white;
+  }
+
+  .product-card .group-hover\:opacity-100 {
+    opacity: 0;
+  }
+
+  .product-card:hover .group-hover\:opacity-100 {
+    opacity: 1;
+  }
+
+  .product-card-overlay {
+    @apply absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent transition-opacity duration-300;
+  }
+
+  /* Section spacing */
+  .section {
+    @apply py-20 md:py-32 px-4 md:px-8;
+  }
+
+  .container-custom {
+    @apply max-w-7xl mx-auto;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

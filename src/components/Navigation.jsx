@@ -1,0 +1,141 @@
+import { useState, useEffect } from 'react';
+import { Menu, X, Search, ShoppingBag } from 'lucide-react';
+import { Helmet } from 'react-helmet-async';
+import { motion, AnimatePresence } from 'framer-motion';
+import logo from '../assets/logo.png';
+
+const Navigation = () => {
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 20);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const navLinks = [
+    { name: 'Home', href: '#home' },
+    { name: 'Collections', href: '#collections' },
+    { name: 'About', href: '#about' },
+    { name: 'Reviews', href: '#reviews' },
+    { name: 'Contact', href: '#contact' },
+  ];
+
+  const scrollToSection = (e, href) => {
+    e.preventDefault();
+    const element = document.querySelector(href);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+      setIsMobileMenuOpen(false);
+    }
+  };
+
+  return (
+    <>
+      <Helmet>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      </Helmet>
+
+      <nav
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
+          isScrolled
+            ? 'bg-secondary/95 backdrop-blur-md py-3 shadow-lg'
+            : 'bg-transparent py-6'
+        }`}
+      >
+        <div className="container-custom">
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <a
+              href="#home"
+              onClick={(e) => scrollToSection(e, '#home')}
+              className="flex items-center"
+            >
+              <img
+                src={logo}
+                alt="Luxe Looks Beauty & Cosmetics KE"
+                className="h-12 md:h-14 w-auto"
+              />
+            </a>
+
+            {/* Desktop Navigation */}
+            <div className="hidden md:flex items-center space-x-8">
+              {navLinks.map((link) => (
+                <a
+                  key={link.name}
+                  href={link.href}
+                  onClick={(e) => scrollToSection(e, link.href)}
+                  className="text-accent/90 hover:text-primary font-medium transition-colors duration-300 text-sm uppercase tracking-wider"
+                >
+                  {link.name}
+                </a>
+              ))}
+            </div>
+
+            {/* Desktop CTA */}
+            <div className="hidden md:flex items-center space-x-4">
+              <a
+                href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary text-sm py-3 px-6"
+              >
+                Join WhatsApp
+              </a>
+              <button className="text-accent hover:text-primary transition-colors">
+                <Search size={22} />
+              </button>
+            </div>
+
+            {/* Mobile Menu Button */}
+            <button
+              className="md:hidden text-accent"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              aria-label="Toggle menu"
+            >
+              {isMobileMenuOpen ? <X size={28} /> : <Menu size={28} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Menu */}
+        <AnimatePresence>
+          {isMobileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="md:hidden bg-secondary/98 backdrop-blur-lg border-t border-gray-800"
+            >
+              <div className="container-custom py-6 space-y-4">
+                {navLinks.map((link) => (
+                  <a
+                    key={link.name}
+                    href={link.href}
+                    onClick={(e) => scrollToSection(e, link.href)}
+                    className="block text-accent hover:text-primary font-medium py-2 text-lg"
+                  >
+                    {link.name}
+                  </a>
+                ))}
+                <a
+                  href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary block text-center mt-6"
+                >
+                  Join WhatsApp Community
+                </a>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </nav>
+    </>
+  );
+};
+
+export default Navigation;
