@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Product, ProductFilters } from '@/types';
+import type { Product, ProductFilters, ProductStatus } from '@/types';
 import { productService } from '@/services/api';
 
 interface ProductState {
@@ -10,8 +10,11 @@ interface ProductState {
   sortOrder: 'asc' | 'desc';
   searchQuery: string;
   filters: ProductFilters;
+  totalCount: number;
   fetchProducts: () => Promise<void>;
   deleteProduct: (id: number) => Promise<void>;
+  archiveProduct: (id: number) => Promise<Product>;
+  restoreProduct: (id: number, previousStatus: ProductStatus) => Promise<Product>;
   addProduct: (product: Product) => void;
   updateProduct: (updatedProduct: Product) => void;
   selectProduct: (id: number, selected: boolean) => void;
@@ -30,6 +33,7 @@ export const useProductStore = create<ProductState>((set) => ({
   sortOrder: 'desc',
   searchQuery: '',
   filters: {},
+  totalCount: 0,
 
   fetchProducts: async () => {
     set({ isLoading: true });
@@ -41,7 +45,7 @@ export const useProductStore = create<ProductState>((set) => ({
         apiFilters.search = state.searchQuery;
       }
       const products = await productService.getAll(apiFilters);
-      set({ products, isLoading: false });
+      set({ products, totalCount: products.length, isLoading: false });
     } catch (error) {
       console.error('Failed to fetch products:', error);
       set({ isLoading: false });
@@ -62,6 +66,73 @@ export const useProductStore = create<ProductState>((set) => ({
       }));
     } catch (error) {
       console.error('Failed to delete product:', error);
+      throw error;
+    }
+  },
+
+  archiveProduct: async (id: number) => {
+    try {
+      const state = useProductStore.getState();
+      const product = state.products.find(p => p.id === id);
+      if (!product) throw new Error('Product not found');
+
+      console.log('Archiving product:', product.id, product.name, 'current status:', product.status);
+
+      // Create FormData with all product fields
+      const formData = new FormData();
+      formData.append('name', product.name);
+      formData.append('category', product.category);
+      formData.append('price', product.price);
+      formData.append('description', product.description || '');
+      formData.append('rating', String(product.rating));
+      formData.append('reviews', String(product.reviews));
+      formData.append('status', 'archived');
+      // Note: image is not included to keep existing image
+
+      // Call API to update status to 'archived'
+      const updatedProduct = await productService.update(id, formData);
+      console.log('Archive response:', updatedProduct);
+
+      set((state) => ({
+        products: state.products.map((p) =>
+          p.id === id ? updatedProduct : p
+        ),
+      }));
+      console.log('Store updated. Product count:', state.products.length);
+      return updatedProduct;
+    } catch (error) {
+      console.error('Failed to archive product:', error);
+      throw error;
+    }
+  },
+
+  restoreProduct: async (id: number, previousStatus: ProductStatus) => {
+    try {
+      const state = useProductStore.getState();
+      const product = state.products.find(p => p.id === id);
+      if (!product) throw new Error('Product not found');
+
+      // Create FormData with all product fields
+      const formData = new FormData();
+      formData.append('name', product.name);
+      formData.append('category', product.category);
+      formData.append('price', product.price);
+      formData.append('description', product.description || '');
+      formData.append('rating', String(product.rating));
+      formData.append('reviews', String(product.reviews));
+      formData.append('status', previousStatus);
+      // Note: image is not included to keep existing image
+
+      // Call API to restore status
+      const updatedProduct = await productService.update(id, formData);
+      set((state) => ({
+        products: state.products.map((p) =>
+          p.id === id ? updatedProduct : p
+        ),
+      }));
+      return updatedProduct;
+    } catch (error) {
+      console.error('Failed to restore product:', error);
       throw error;
     }
   },

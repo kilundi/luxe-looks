@@ -33,7 +33,14 @@
       "Bash(findstr \":300[0-9]\")",
       "Bash(findstr \"vite\\\\|node\")",
       "Bash(findstr \"26000\\\\|24056\")",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(sqlite3 luxe_looks.db \".schema products\")",
+      "Bash(cp:*)",
+      "Bash(findstr :5174)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(findstr :517)",
+      "Bash(findstr :5173)",
+      "Bash(git add:*)"
     ]
   }
 }

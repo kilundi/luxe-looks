@@ -4,6 +4,8 @@ export interface User {
   created_at: string;
 }
 
+export type ProductStatus = 'draft' | 'published' | 'archived';
+
 export interface Product {
   id: number;
   name: string;
@@ -13,6 +15,7 @@ export interface Product {
   image?: string;
   rating: number;
   reviews: number;
+  status: ProductStatus;
   created_at: string;
   updated_at: string;
 }
@@ -22,6 +25,21 @@ export interface Category {
   name: string;
   slug: string;
   description?: string;
+  icon?: string;
+  color: string;
+  sort_order: number;
+  is_active: boolean;
+  product_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MediaItem {
+  filename: string;
+  path: string;
+  size: number;
+  size_formatted: string;
+  uploaded_at: string;
   product_count: number;
 }
 
@@ -50,6 +68,7 @@ export interface PaginatedResponse<T> {
 export interface ProductFilters {
   search?: string;
   category?: string;
+  status?: ProductStatus;
   minPrice?: number;
   maxPrice?: number;
   minRating?: number;
@@ -59,4 +78,7 @@ export interface ProductFilters {
   sortOrder?: 'asc' | 'desc';
 }
 
-export type ProductStatus = 'draft' | 'published' | 'archived';
+export interface CategoryOrder {
+  id: number;
+  sort_order: number;
+}

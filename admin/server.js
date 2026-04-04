@@ -45,9 +45,46 @@ db.serialize(() => {
     image TEXT,
     rating REAL DEFAULT 4.0,
     reviews INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'published',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // Categories table
+  db.run(`CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    slug TEXT UNIQUE NOT NULL,
+    description TEXT,
+    icon TEXT,
+    color TEXT DEFAULT '#D4AF37',
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Add missing columns to existing products table (migrations)
+  // Check if status column exists
+  db.all("PRAGMA table_info(products)", (err, columns) => {
+    if (err) {
+      console.error('Migration ERROR checking products table:', err);
+      return;
+    }
+    console.log('Products table columns:', columns ? columns.map(c => c.name).join(', ') : 'none');
+    const hasStatusColumn = columns && columns.some(col => col.name === 'status');
+    if (!hasStatusColumn) {
+      db.run(`ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'published'`, (err) => {
+        if (err) {
+          console.error('Migration ERROR adding status column:', err.message);
+        } else {
+          console.log('Migration: Added status column to products table');
+        }
+      });
+    } else {
+      console.log('Migration: status column already exists');
+    }
+  });
 });
 
 // Image upload configuration
@@ -176,13 +213,13 @@ app.get('/api/products/:id', (req, res) => {
 
 // Create product
 app.post('/api/products', authenticateToken, upload.single('image'), (req, res) => {
-  const { name, category, price, description, rating, reviews } = req.body;
+  const { name, category, price, description, rating, reviews, status } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
   db.run(
-    `INSERT INTO products (name, category, price, description, image, rating, reviews)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [name, category, price, description, image, rating || 4.0, reviews || 0],
+    `INSERT INTO products (name, category, price, description, image, rating, reviews, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name, category, price, description, image, rating || 4.0, reviews || 0, status || 'published'],
     function (err) {
       if (err) {
         return res.status(500).json({ error: err.message });
@@ -196,6 +233,7 @@ app.post('/api/products', authenticateToken, upload.single('image'), (req, res) 
         image,
         rating: rating || 4.0,
         reviews: reviews || 0,
+        status: status || 'published',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       });
@@ -205,7 +243,10 @@ app.post('/api/products', authenticateToken, upload.single('image'), (req, res) 
 
 // Update product
 app.put('/api/products/:id', authenticateToken, upload.single('image'), (req, res) => {
-  const { name, category, price, description, rating, reviews } = req.body;
+  const { name, category, price, description, rating, reviews, status } = req.body;
+  console.log(`[PUT /api/products/${req.params.id}] Body:`, {
+    name, category, price, description, rating, reviews, status
+  });
   const productId = req.params.id;
 
   // First get current product to check for existing image
@@ -219,13 +260,16 @@ app.put('/api/products/:id', authenticateToken, upload.single('image'), (req, re
     db.run(
       `UPDATE products
        SET name = ?, category = ?, price = ?, description = ?,
-           image = ?, rating = ?, reviews = ?, updated_at = CURRENT_TIMESTAMP
+           image = ?, rating = ?, reviews = ?, status = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [name, category, price, description, image, rating, reviews, productId],
+      [name, category, price, description, image, rating, reviews, status || product.status || 'published', productId],
       function (err) {
         if (err) {
+          console.error(`[PUT /api/products/${productId}] UPDATE error:`, err.message);
           return res.status(500).json({ error: err.message });
         }
+        const savedStatus = status || product.status || 'published';
+        console.log(`[PUT /api/products/${productId}] UPDATE successful. Status set to: ${savedStatus}`);
         res.json({
           id: productId,
           name,
@@ -235,6 +279,7 @@ app.put('/api/products/:id', authenticateToken, upload.single('image'), (req, re
           image,
           rating: parseFloat(rating),
           reviews: parseInt(reviews),
+          status: savedStatus,
           created_at: product.created_at,
           updated_at: new Date().toISOString()
         });
@@ -269,6 +314,330 @@ app.delete('/api/products/:id', authenticateToken, (req, res) => {
     });
   });
 });
+
+// ==================== CATEGORIES API ====================
+
+// Get all categories
+app.get('/api/categories', (req, res) => {
+  db.all('SELECT * FROM categories ORDER BY sort_order ASC, name ASC', (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(rows);
+  });
+});
+
+// Get single category
+app.get('/api/categories/:id', (req, res) => {
+  db.get('SELECT * FROM categories WHERE id = ?', [req.params.id], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (!row) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    res.json(row);
+  });
+});
+
+// Create category
+app.post('/api/categories', authenticateToken, (req, res) => {
+  const { name, slug, description, icon, color, sort_order, is_active } = req.body;
+
+  if (!name || !slug) {
+    return res.status(400).json({ error: 'Name and slug are required' });
+  }
+
+  db.run(
+    `INSERT INTO categories (name, slug, description, icon, color, sort_order, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [name, slug, description || null, icon || null, color || '#D4AF37', sort_order || 0, is_active !== undefined ? is_active : 1],
+    function (err) {
+      if (err) {
+        if (err.message.includes('UNIQUE constraint failed')) {
+          return res.status(400).json({ error: 'Category with this name or slug already exists' });
+        }
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({
+        id: this.lastID,
+        name,
+        slug,
+        description,
+        icon,
+        color: color || '#D4AF37',
+        sort_order: sort_order || 0,
+        is_active: is_active !== undefined ? is_active : 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+  );
+});
+
+// Update category
+app.put('/api/categories/:id', authenticateToken, (req, res) => {
+  const { name, slug, description, icon, color, sort_order, is_active } = req.body;
+  const categoryId = req.params.id;
+
+  db.get('SELECT * FROM categories WHERE id = ?', [categoryId], (err, category) => {
+    if (err || !category) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    db.run(
+      `UPDATE categories
+       SET name = ?, slug = ?, description = ?, icon = ?, color = ?, sort_order = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        name || category.name,
+        slug || category.slug,
+        description !== undefined ? description : category.description,
+        icon !== undefined ? icon : category.icon,
+        color || category.color,
+        sort_order !== undefined ? sort_order : category.sort_order,
+        is_active !== undefined ? is_active : category.is_active,
+        categoryId
+      ],
+      function (err) {
+        if (err) {
+          if (err.message.includes('UNIQUE constraint failed')) {
+            return res.status(400).json({ error: 'Category with this name or slug already exists' });
+          }
+          return res.status(500).json({ error: err.message });
+        }
+        res.json({
+          id: categoryId,
+          name: name || category.name,
+          slug: slug || category.slug,
+          description: description !== undefined ? description : category.description,
+          icon: icon !== undefined ? icon : category.icon,
+          color: color || category.color,
+          sort_order: sort_order !== undefined ? sort_order : category.sort_order,
+          is_active: is_active !== undefined ? is_active : category.is_active,
+          created_at: category.created_at,
+          updated_at: new Date().toISOString()
+        });
+      }
+    );
+  });
+});
+
+// Delete category
+app.delete('/api/categories/:id', authenticateToken, (req, res) => {
+  const categoryId = req.params.id;
+
+  // Check if category has products
+  db.get('SELECT COUNT(*) as count FROM products WHERE category = (SELECT name FROM categories WHERE id = ?)', [categoryId], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (row && row.count > 0) {
+      return res.status(400).json({ error: `Cannot delete category with ${row.count} product(s). Reassign products first.` });
+    }
+
+    db.run('DELETE FROM categories WHERE id = ?', [categoryId], function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ message: 'Category deleted successfully' });
+    });
+  });
+});
+
+// Reorder categories
+app.post('/api/categories/reorder', authenticateToken, (req, res) => {
+  const { categoryOrders } = req.body; // Array of { id, sort_order }
+
+  if (!Array.isArray(categoryOrders)) {
+    return res.status(400).json({ error: 'categoryOrders array is required' });
+  }
+
+  db.serialize(() => {
+    let completed = 0;
+    const errors = [];
+
+    categoryOrders.forEach((order, index) => {
+      db.run(
+        'UPDATE categories SET sort_order = ? WHERE id = ?',
+        [order.sort_order || index, order.id],
+        function (err) {
+          if (err) {
+            errors.push(`Category ${order.id}: ${err.message}`);
+          }
+          completed++;
+          if (completed === categoryOrders.length) {
+            if (errors.length > 0) {
+              return res.status(500).json({ error: errors.join(', ') });
+            }
+            res.json({ message: 'Categories reordered successfully' });
+          }
+        }
+      );
+    });
+  });
+});
+
+// ==================== MEDIA API ====================
+
+// Get all media (images from uploads folder)
+app.get('/api/media', authenticateToken, (req, res) => {
+  const uploadsDir = path.join(__dirname, 'uploads');
+
+  fs.readdir(uploadsDir, (err, files) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    const imageFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+    });
+
+    const mediaList = imageFiles.map(filename => {
+      const filePath = path.join(uploadsDir, filename);
+      const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
+      const size = stats ? stats.size : 0;
+      const uploadDate = stats ? stats.mtime.toISOString() : '';
+
+      // Get product count that uses this image
+      const imagePath = `/uploads/${filename}`;
+      // We'll count synchronously for simplicity
+      let productCount = 0;
+      db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
+        if (!err && row) productCount = row.count;
+      });
+
+      return {
+        filename,
+        path: imagePath,
+        size,
+        size_formatted: formatBytes(size),
+        uploaded_at: uploadDate,
+        product_count: productCount
+      };
+    });
+
+    res.json(mediaList);
+  });
+});
+
+// Delete media file
+app.delete('/api/media/:filename', authenticateToken, (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(__dirname, 'uploads', filename);
+
+  // Check if file is used by any product
+  const imagePath = `/uploads/${filename}`;
+  db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (row && row.count > 0) {
+      return res.status(400).json({ error: `Cannot delete image used by ${row.count} product(s). Remove from products first.` });
+    }
+
+    fs.unlink(filePath, (err) => {
+      if (err) {
+        if (err.code === 'ENOENT') {
+          return res.status(404).json({ error: 'File not found' });
+        }
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ message: 'Media deleted successfully' });
+    });
+  });
+});
+
+// Upload media (bulk)
+const uploadMultiple = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error('Only image files are allowed'));
+  }
+}).array('images', 10); // Up to 10 images at once
+
+app.post('/api/media/upload', authenticateToken, (req, res) => {
+  uploadMultiple(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+
+    const uploadedFiles = req.files.map((file) => ({
+      filename: file.filename,
+      path: `/uploads/${file.filename}`,
+      size: file.size,
+      size_formatted: formatBytes(file.size),
+      uploaded_at: new Date().toISOString(),
+      product_count: 0
+    }));
+
+    res.json({
+      message: `${uploadedFiles.length} file(s) uploaded successfully`,
+      files: uploadedFiles
+    });
+  });
+});
+
+// Get unused images
+app.get('/api/media/unused', authenticateToken, (req, res) => {
+  const uploadsDir = path.join(__dirname, 'uploads');
+
+  fs.readdir(uploadsDir, (err, files) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    const imageFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+    });
+
+    // Check which files are used in products
+    const unusedFiles = [];
+    let checked = 0;
+
+    if (imageFiles.length === 0) {
+      return res.json({ unused: [] });
+    }
+
+    const checkUsage = (filename) => {
+      const imagePath = `/uploads/${filename}`;
+      db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
+        if (!err && (!row || row.count === 0)) {
+          unusedFiles.push(filename);
+        }
+        checked++;
+        if (checked === imageFiles.length) {
+          res.json({ unused: unusedFiles });
+        }
+      });
+    };
+
+    imageFiles.forEach(checkUsage);
+  });
+});
+
+// Helper function to format bytes
+function formatBytes(bytes, decimals = 2) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
 
 // Serve admin client
 app.get('/admin/*', (req, res) => {

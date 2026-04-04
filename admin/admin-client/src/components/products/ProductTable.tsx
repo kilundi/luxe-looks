@@ -1,13 +1,10 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  MoreVertical,
   Edit2,
   Trash2,
-  Copy,
   ChevronUp,
   ChevronDown,
-  ExternalLink,
 } from 'lucide-react';
 import { useProductStore } from '@/store/useProductStore';
 import { Button } from '@/components/ui/Button';
@@ -17,14 +14,16 @@ import { format } from 'date-fns';
 interface ProductTableProps {
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
+  products?: Product[];
 }
 
 export const ProductTable: React.FC<ProductTableProps> = ({
   onEdit,
   onDelete,
+  products: propProducts,
 }) => {
   const {
-    products,
+    products: storeProducts,
     selectedIds,
     selectProduct,
     selectAll,
@@ -33,6 +32,9 @@ export const ProductTable: React.FC<ProductTableProps> = ({
     sortOrder,
     setSorting,
   } = useProductStore();
+
+  // Use prop products if provided, otherwise use store products
+  const products = propProducts || storeProducts;
 
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
 
@@ -47,20 +49,10 @@ export const ProductTable: React.FC<ProductTableProps> = ({
     }
   };
 
-  const sortedProducts = [...products].sort((a, b) => {
-    const aVal = a[sortBy as keyof Product];
-    const bVal = b[sortBy as keyof Product];
-
-    if (typeof aVal === 'string' && typeof bVal === 'string') {
-      return sortOrder === 'asc'
-        ? aVal.localeCompare(bVal)
-        : bVal.localeCompare(aVal);
-    }
-    if (typeof aVal === 'number' && typeof bVal === 'number') {
-      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
-    }
-    return 0;
-  });
+  // Note: Sorting is done in parent component (App.tsx) when using pagination
+  // When propProducts is provided, it's already sorted and paginated
+  // When not provided (fallback to store products), sorting happens in parent too
+  // So we just use the products array directly here
 
   const handleBulkDelete = () => {
     if (window.confirm(`Delete ${selectedIds.size} products?`)) {
@@ -134,6 +126,12 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                   <SortingIcon column="category" />
                 </div>
               </th>
+              <th className="table-header" onClick={() => handleSort('status')}>
+                <div className="flex items-center gap-2">
+                  Status
+                  <SortingIcon column="status" />
+                </div>
+              </th>
               <th className="table-header" onClick={() => handleSort('price')}>
                 <div className="flex items-center gap-2">
                   Price
@@ -156,7 +154,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-dark-800">
-            {sortedProducts.map((product, index) => (
+            {products.map((product, index) => (
               <motion.tr
                 key={product.id}
                 initial={{ opacity: 0, y: 10 }}
@@ -189,6 +187,19 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                 </td>
                 <td className="table-cell">
                   <span className="badge badge-blue">{product.category}</span>
+                </td>
+                <td className="table-cell">
+                  <span
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      product.status === 'published'
+                        ? 'bg-green-900/50 text-green-400 border border-green-800'
+                        : product.status === 'draft'
+                        ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-800'
+                        : 'bg-gray-900/50 text-gray-400 border border-gray-800'
+                    }`}
+                  >
+                    {product.status}
+                  </span>
                 </td>
                 <td className="table-cell font-medium text-primary-500">
                   {product.price}

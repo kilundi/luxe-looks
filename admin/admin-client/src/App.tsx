@@ -1,12 +1,14 @@
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, Outlet, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useCategoryStore } from '@/store/useCategoryStore';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { AdminLayout } from '@/components/layout/AdminLayout';
 import { Dashboard } from '@/components/dashboard/Dashboard';
 import { ProductTable } from '@/components/products/ProductTable';
 import { ProductForm } from '@/components/products/ProductForm';
+import { ProductFilters } from '@/components/products/ProductFilters';
 import { useProductStore } from '@/store/useProductStore';
 import type { Product } from '@/types';
 import toast from 'react-hot-toast';
@@ -115,12 +117,92 @@ const ProductsPage = () => {
   const [selectedProduct, setSelectedProduct] = React.useState<Product | null>(null);
   const [showForm, setShowForm] = React.useState(false);
   const [deleteConfirm, setDeleteConfirm] = React.useState<Product | null>(null);
+  const [archivedProduct, setArchivedProduct] = React.useState<{ product: Product; previousStatus: Product['status']; toastId: string; timer: number } | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const { products, fetchProducts, deleteProduct, addProduct, updateProduct } = useProductStore();
+  const {
+    products,
+    isLoading,
+    fetchProducts,
+    deleteProduct,
+    addProduct,
+    updateProduct,
+    searchQuery,
+    setSearchQuery,
+    filters,
+    setFilters,
+    sortBy,
+    sortOrder,
+    setSorting,
+    selectedIds,
+    clearSelection,
+  } = useProductStore();
 
+  const { categories, fetchCategories } = useCategoryStore();
+
+  // Fetch categories on mount
+  React.useEffect(() => {
+    if (categories.length === 0) {
+      fetchCategories();
+    }
+  }, [categories.length, fetchCategories]);
+
+  // Sync URL query params with store on mount
+  React.useEffect(() => {
+    const search = searchParams.get('search') || '';
+    const category = searchParams.get('category') || undefined;
+    const status = searchParams.get('status') as 'draft' | 'published' | 'archived' | undefined;
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '25');
+    const sortByParam = searchParams.get('sortBy') || 'created_at';
+    const sortOrderParam = (searchParams.get('sortOrder') as 'asc' | 'desc') || 'desc';
+
+    setSearchQuery(search);
+    setFilters({ category, status, page, limit });
+    setSorting(sortByParam, sortOrderParam);
+  }, [searchParams, setSearchQuery, setFilters, setSorting]);
+
+  // Update URL when store state changes
+  const updateSearchParams = React.useCallback(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set('search', searchQuery);
+    if (filters.category) params.set('category', filters.category);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.page && filters.page > 1) params.set('page', String(filters.page));
+    if (filters.limit && filters.limit !== 25) params.set('limit', String(filters.limit));
+    if (sortBy !== 'created_at') params.set('sortBy', sortBy);
+    if (sortOrder !== 'desc') params.set('sortOrder', sortOrder);
+    setSearchParams(params, { replace: true });
+  }, [searchQuery, filters, sortBy, sortOrder, setSearchParams]);
+
+  React.useEffect(() => {
+    updateSearchParams();
+  }, [updateSearchParams]);
+
+  // Fetch products when filters change
   React.useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
+
+  // Debounced search
+  const [debouncedSearch, setDebouncedSearch] = React.useState(searchQuery);
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Reset to page 1 when search debounces or filters change
+  React.useEffect(() => {
+    if (filters.page && filters.page > 1) {
+      setFilters({ page: 1 });
+    }
+  }, [debouncedSearch, filters.category, filters.status]);
+
+  React.useEffect(() => {
+    fetchProducts();
+  }, [debouncedSearch, filters.category, filters.status, sortBy, sortOrder, filters.limit, filters.page]);
 
   const handleEdit = (product: Product) => {
     setSelectedProduct(product);
@@ -136,22 +218,149 @@ const ProductsPage = () => {
     setDeleteConfirm(product);
   };
 
-  const confirmDelete = async () => {
+  const confirmArchive = async () => {
     if (deleteConfirm) {
       try {
-        await deleteProduct(deleteConfirm.id);
-        toast.success('Product deleted successfully');
+        console.log('Confirming archive for product:', deleteConfirm.id, deleteConfirm.name);
+        const previousStatus = deleteConfirm.status || 'published';
+        const archived = await (useProductStore.getState().archiveProduct(deleteConfirm.id));
+        console.log('Archive successful, returned product:', archived);
         setDeleteConfirm(null);
+
+        // Generate a unique toast ID
+        const toastId = `archive-${Date.now()}`;
+
+        // Set a timer to auto-clear the archivedProduct state after 15 seconds
+        const timer = window.setTimeout(() => {
+          setArchivedProduct(null);
+        }, 15000);
+
+        setArchivedProduct({
+          product: archived,
+          previousStatus,
+          toastId,
+          timer,
+        });
+
+        console.log('Showing toast with ID:', toastId);
+
+        // Show toast with Undo button
+        toast.custom(
+          (t) => (
+            <div className="bg-dark-900 border border-dark-800 rounded-xl shadow-2xl p-4 min-w-[320px] flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium text-white">Product archived</p>
+                <p className="text-sm text-dark-400 truncate max-w-[200px]">{archived.name}</p>
+                <p className="text-xs text-dark-500 mt-1">Undo within 15 seconds</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    handleUndo(t.id);
+                    toast.dismiss(t.id);
+                  }}
+                  className="px-3 py-1 bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Undo
+                </button>
+                <button
+                  onClick={() => {
+                    toast.dismiss(t.id);
+                  }}
+                  className="px-3 py-1 bg-dark-800 hover:bg-dark-700 text-dark-200 text-sm rounded-lg transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ),
+          {
+            id: toastId,
+            duration: 15000,
+          }
+        );
       } catch (error: any) {
-        toast.error(error.response?.data?.error || 'Failed to delete product');
+        console.error('Archive error:', error);
+        toast.error(error.response?.data?.error || 'Failed to archive product');
+        setDeleteConfirm(null);
       }
     }
+  };
+
+  const handleUndo = (toastId?: string) => {
+    if (!archivedProduct) return;
+
+    const { product, previousStatus, timer } = archivedProduct;
+    window.clearTimeout(timer);
+
+    useProductStore.getState().restoreProduct(product.id, previousStatus)
+      .then(() => {
+        if (toastId) toast.dismiss(toastId);
+        toast.success('Product restored');
+      })
+      .catch((error: any) => {
+        toast.error(error.response?.data?.error || 'Failed to restore product');
+      })
+      .finally(() => {
+        setArchivedProduct(null);
+      });
   };
 
   const handleFormSuccess = () => {
     fetchProducts();
     setShowForm(false);
     setSelectedProduct(null);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+  };
+
+  const handleCategoryChange = (category: string) => {
+    setFilters({ category: category || undefined, page: 1 });
+  };
+
+  const handleStatusChange = (status: string) => {
+    setFilters({ status: status as 'draft' | 'published' | 'archived' | undefined, page: 1 });
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilters({ category: undefined, status: undefined, page: 1, limit: 25 });
+    setSorting('created_at', 'desc');
+  };
+
+  const activeFiltersCount = (searchQuery ? 1 : 0) + (!!filters.category ? 1 : 0) + (!!filters.status ? 1 : 0);
+
+  // Pagination calculations
+  const totalItems = useProductStore.getState().totalCount;
+  const currentPage = filters.page || 1;
+  const itemsPerPage = filters.limit || 25;
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+
+  // Sort products first (before pagination)
+  const sortedProducts = [...products].sort((a, b) => {
+    const aVal = a[sortBy as keyof Product];
+    const bVal = b[sortBy as keyof Product];
+
+    if (typeof aVal === 'string' && typeof bVal === 'string') {
+      return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    }
+    if (typeof aVal === 'number' && typeof bVal === 'number') {
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    }
+    return 0;
+  });
+
+  // Get current page items (client-side pagination)
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+  const displayedProducts = sortedProducts.slice(startIndex, endIndex);
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setFilters({ page });
+    }
   };
 
   return (
@@ -169,15 +378,105 @@ const ProductsPage = () => {
         </button>
       </div>
 
-      <ProductTable onEdit={handleEdit} onDelete={handleDelete} />
+      <ProductFilters
+        searchQuery={searchQuery}
+        onSearchChange={handleSearchChange}
+        category={filters.category || ''}
+        onCategoryChange={handleCategoryChange}
+        status={filters.status || ''}
+        onStatusChange={handleStatusChange}
+        onClearFilters={clearFilters}
+        activeFiltersCount={activeFiltersCount}
+        categories={categories}
+      />
 
-      {/* Delete Confirmation Modal */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+        </div>
+      ) : (
+        <ProductTable onEdit={handleEdit} onDelete={handleDelete} products={displayedProducts} />
+      )}
+
+      {/* Pagination Controls */}
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 border-t border-dark-800">
+        <div className="text-sm text-dark-400">
+          Showing {startIndex + 1} - {endIndex} of {totalItems} products
+          {totalItems === 0 && ' No products match your filters'}
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-dark-400">Items per page:</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => {
+                setFilters({ limit: parseInt(e.target.value), page: 1 });
+              }}
+              className="px-3 py-1 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+
+          {/* Page Navigation */}
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => goToPage(1)}
+                disabled={currentPage === 1}
+                className="px-2 py-1 text-sm bg-dark-800 border border-dark-700 rounded text-dark-400 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="First page"
+              >
+                ⇤
+              </button>
+              <button
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-2 py-1 text-sm bg-dark-800 border border-dark-700 rounded text-dark-400 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Previous page"
+              >
+                ←
+              </button>
+
+              <span className="px-4 py-1 text-sm text-white bg-dark-800 border border-dark-700 rounded whitespace-nowrap">
+                Page {currentPage} / {totalPages}
+              </span>
+
+              <button
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="px-2 py-1 text-sm bg-dark-800 border border-dark-700 rounded text-dark-400 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Next page"
+              >
+                →
+              </button>
+              <button
+                onClick={() => goToPage(totalPages)}
+                disabled={currentPage === totalPages}
+                className="px-2 py-1 text-sm bg-dark-800 border border-dark-700 rounded text-dark-400 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Last page"
+              >
+                ⇥
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Archive Confirmation Modal */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-dark-900 border border-dark-800 rounded-xl shadow-2xl max-w-md w-full p-6">
-            <h3 className="text-xl font-bold text-white mb-2">Delete Product</h3>
+            <h3 className="text-xl font-bold text-white mb-2">Archive Product</h3>
             <p className="text-dark-400 mb-6">
-              Are you sure you want to delete "{deleteConfirm.name}"? This action cannot be undone.
+              Are you sure you want to archive "{deleteConfirm.name}"? It will be hidden from the public.
+            </p>
+            <p className="text-sm text-yellow-400 mb-4">
+              You can undo this action within 15 seconds.
             </p>
             <div className="flex gap-3 justify-end">
               <button
@@ -187,10 +486,10 @@ const ProductsPage = () => {
                 Cancel
               </button>
               <button
-                onClick={confirmDelete}
-                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"
+                onClick={confirmArchive}
+                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors"
               >
-                Delete
+                Archive
               </button>
             </div>
           </div>

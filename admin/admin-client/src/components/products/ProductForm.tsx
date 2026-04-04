@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Upload, Image as ImageIcon } from 'lucide-react';
+import { X, Upload, Image as ImageIcon, FolderOpen } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/Button';
 import { useProductStore } from '@/store/useProductStore';
+import { useCategoryStore } from '@/store/useCategoryStore';
 import { productService } from '@/services/api';
-import type { Product } from '@/types';
+import type { Product, ProductStatus } from '@/types';
 import toast from 'react-hot-toast';
 
 interface ProductFormProps {
@@ -16,6 +17,16 @@ interface ProductFormProps {
   onSuccess: () => void;
 }
 
+interface FormData {
+  name: string;
+  category: string;
+  price: string;
+  description: string;
+  rating: number;
+  reviews: number;
+  status: ProductStatus;
+}
+
 export const ProductForm: React.FC<ProductFormProps> = ({
   product,
   isOpen,
@@ -23,17 +34,29 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   onSuccess,
 }) => {
   const { addProduct, updateProduct } = useProductStore();
-  const [formData, setFormData] = useState({
+  const { categories, fetchCategories } = useCategoryStore();
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     category: '',
     price: '',
     description: '',
     rating: 4.0,
     reviews: 0,
+    status: 'published',
   });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
+
+  // Fetch categories on mount
+  useEffect(() => {
+    if (categories.length === 0) {
+      fetchCategories();
+    }
+  }, [categories.length, fetchCategories]);
+
+  // Load media picker (from media store) when needed - to be implemented
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp'] },
@@ -57,6 +80,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         description: product.description || '',
         rating: product.rating,
         reviews: product.reviews,
+        status: product.status || 'published',
       });
       if (product.image) {
         setImagePreview(product.image.startsWith('http') ? product.image : `http://localhost:3001${product.image}`);
@@ -69,6 +93,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         description: '',
         rating: 4.0,
         reviews: 0,
+        status: 'published',
       });
       setImageFile(null);
       setImagePreview(null);
@@ -87,6 +112,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
       formDataToSend.append('description', formData.description);
       formDataToSend.append('rating', String(formData.rating));
       formDataToSend.append('reviews', String(formData.reviews));
+      formDataToSend.append('status', formData.status);
       if (imageFile) {
         formDataToSend.append('image', imageFile);
       }
@@ -156,22 +182,28 @@ export const ProductForm: React.FC<ProductFormProps> = ({
 
               <div>
                 <label className="label">Category *</label>
-                <select
-                  required
-                  value={formData.category}
-                  onChange={(e) =>
-                    setFormData({ ...formData, category: e.target.value })
-                  }
-                  className="select"
-                >
-                  <option value="">Select category</option>
-                  <option value="Fragrances">Fragrances</option>
-                  <option value="Beauty">Beauty</option>
-                  <option value="Hair">Hair</option>
-                  <option value="Bags">Bags</option>
-                  <option value="Watches">Watches</option>
-                  <option value="Jewelry">Jewelry</option>
-                </select>
+                {categories.length === 0 ? (
+                  <div className="text-dark-400 text-sm py-2">Loading categories...</div>
+                ) : (
+                  <select
+                    required
+                    value={formData.category}
+                    onChange={(e) =>
+                      setFormData({ ...formData, category: e.target.value })
+                    }
+                    className="select"
+                  >
+                    <option value="">Select category</option>
+                    {categories
+                      .filter(c => c.is_active)
+                      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+                      .map((cat) => (
+                        <option key={cat.id} value={cat.name}>
+                          {cat.name}
+                        </option>
+                      ))}
+                  </select>
+                )}
               </div>
 
               <div>
@@ -186,6 +218,24 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                   className="input"
                   placeholder="e.g., KSh 4,500"
                 />
+              </div>
+
+              <div>
+                <label className="label">Status</label>
+                <select
+                  value={formData.status}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value as 'draft' | 'published' | 'archived' })
+                  }
+                  className="select"
+                >
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <p className="text-xs text-dark-500 mt-1">
+                  Draft products are hidden from customers
+                </p>
               </div>
 
               <div>

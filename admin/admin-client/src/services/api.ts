@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Product, User, DashboardStats, ProductFilters } from '@/types';
+import type { Product, User, DashboardStats, ProductFilters, Category, MediaItem, CategoryOrder } from '@/types';
 
 const API_URL = '/api';
 
@@ -101,6 +101,65 @@ export const productService = {
     const response = await api.post<{ message: string }>('/products/bulk-delete', {
       ids,
     });
+    return response.data;
+  },
+};
+
+// Category services
+export const categoryService = {
+  getAll: async () => {
+    const response = await api.get<Category[]>('/categories');
+    return response.data;
+  },
+
+  getById: async (id: number) => {
+    const response = await api.get<Category>(`/categories/${id}`);
+    return response.data;
+  },
+
+  create: async (categoryData: Omit<Category, 'id' | 'created_at' | 'updated_at' | 'product_count'>) => {
+    const response = await api.post<Category>('/categories', categoryData);
+    return response.data;
+  },
+
+  update: async (id: number, updates: Partial<Category>) => {
+    const response = await api.put<Category>(`/categories/${id}`, updates);
+    return response.data;
+  },
+
+  delete: async (id: number) => {
+    const response = await api.delete<{ message: string }>(`/categories/${id}`);
+    return response.data;
+  },
+
+  reorder: async (orders: CategoryOrder[]) => {
+    const response = await api.post<{ message: string }>('/categories/reorder', {
+      categoryOrders: orders,
+    });
+    return response.data;
+  },
+};
+
+// Media services
+export const mediaService = {
+  getAll: async () => {
+    const response = await api.get<MediaItem[]>('/media');
+    return response.data;
+  },
+
+  upload: async (files: File[]) => {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('images', file);
+    });
+    const response = await api.post<{ message: string; files: MediaItem[] }>('/media/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
+  delete: async (filename: string) => {
+    const response = await api.delete<{ message: string }>(`/media/${filename}`);
     return response.data;
   },
 };
