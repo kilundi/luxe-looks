@@ -43,6 +43,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
     sortBy,
     sortOrder,
     setSorting,
+    bulkDelete,
   } = useProductStore();
 
   // Use prop products if provided, otherwise use store products
@@ -66,11 +67,16 @@ export const ProductTable: React.FC<ProductTableProps> = ({
   // When not provided (fallback to store products), sorting happens in parent too
   // So we just use the products array directly here
 
-  const handleBulkDelete = () => {
-    if (window.confirm(`Delete ${selectedIds.size} products?`)) {
-      // Would call bulk delete API
-      console.log('Bulk delete:', Array.from(selectedIds));
-      clearSelection();
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.size} products? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await bulkDelete(Array.from(selectedIds));
+      // Note: clearSelection() is called in the store after successful delete
+    } catch (error) {
+      // Error toast handled in store
     }
   };
 

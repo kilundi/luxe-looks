@@ -17,6 +17,7 @@ interface ProductState {
   archiveProduct: (id: number) => Promise<Product>;
   restoreProduct: (id: number, previousStatus: ProductStatus) => Promise<Product>;
   duplicateProduct: (id: number) => Promise<Product>;
+  bulkDelete: (ids: number[]) => Promise<void>;
   bulkUpdate: (ids: number[], updates: Partial<Product>) => Promise<{ updatedCount: number }>;
   addProduct: (product: Product) => void;
   updateProduct: (updatedProduct: Product) => void;
@@ -31,7 +32,7 @@ interface ProductState {
 export const useProductStore = create<ProductState>((set) => ({
   products: [],
   isLoading: false,
-  selectedIds: new Set(),
+  selectedIds: new Set<number>(),
   sortBy: 'created_at',
   sortOrder: 'desc',
   searchQuery: '',
@@ -104,6 +105,21 @@ export const useProductStore = create<ProductState>((set) => ({
       return result;
     } catch (error: any) {
       toast.error(error?.response?.data?.error || 'Failed to bulk update products');
+      throw error;
+    }
+  },
+
+  bulkDelete: async (ids: number[]) => {
+    try {
+      await productService.bulkDelete(ids);
+      // Remove deleted products from local state
+      set((state) => ({
+        products: state.products.filter(p => !ids.includes(p.id)),
+        selectedIds: new Set(),
+      }));
+      toast.success(`Deleted ${ids.length} products successfully`);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Failed to delete products');
       throw error;
     }
   },
