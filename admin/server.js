@@ -12,6 +12,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'luxe-looks-secret-key-change-in-production';
 
+// Validate JWT_SECRET in production
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('FATAL ERROR: JWT_SECRET is not set in production');
+  process.exit(1);
+}
+
 // Multer configuration for CSV import (store in memory)
 const uploadCSV = multer({
   storage: multer.memoryStorage(),
@@ -25,6 +31,21 @@ function parsePriceToNumber(priceStr) {
   const numericStr = priceStr.toString().replace(/[^0-9.]/g, '');
   const num = parseFloat(numericStr);
   return isNaN(num) ? null : num;
+}
+
+// Password strength validation
+function validatePasswordStrength(password) {
+  const checks = {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /\d/.test(password),
+    special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
+  };
+  return {
+    valid: Object.values(checks).every(Boolean),
+    checks
+  };
 }
 
 // Middleware
@@ -81,6 +102,18 @@ db.serialize(() => {
     is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Sessions table for tracking active login sessions
+  db.run(`CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token_id TEXT UNIQUE NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
 
   // Add missing columns to existing products table (migrations)
@@ -198,6 +231,18 @@ app.post('/api/register', async (req, res) => {
     return res.status(400).json({ error: 'Username and password required' });
   }
 
+  const passwordValidation = validatePasswordStrength(password);
+  if (!passwordValidation.valid) {
+    const missing = Object.entries(passwordValidation.checks)
+      .filter(([, ok]) => !ok)
+      .map(([name]) => name);
+    return res.status(400).json({
+      error: 'Password does not meet requirements',
+      requirements: passwordValidation.checks,
+      missing
+    });
+  }
+
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     db.run(
@@ -221,6 +266,8 @@ app.post('/api/register', async (req, res) => {
 // Login
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
+  const ip = req.ip || req.connection.remoteAddress;
+  const userAgent = req.headers['user-agent'] || '';
 
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
     if (err || !user) {
@@ -233,13 +280,156 @@ app.post('/api/login', (req, res) => {
         return res.status(400).json({ error: 'Invalid credentials' });
       }
 
+      const tokenId = `${user.id}-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
       const token = jwt.sign(
-        { id: user.id, username: user.username },
+        { id: user.id, username: user.username, tokenId },
         JWT_SECRET,
         { expiresIn: '24h' }
       );
 
+      await new Promise((resolve, reject) => {
+        db.run(
+          'INSERT INTO sessions (user_id, token_id, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?)',
+          [user.id, tokenId, ip, userAgent, expiresAt],
+          (err) => err ? reject(err) : resolve()
+        );
+      });
+
       res.json({ token, user: { id: user.id, username: user.username } });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+// ==================== SESSION MANAGEMENT ROUTES ====================
+
+// Enhanced token validation middleware
+const authenticateTokenWithSession = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+
+    const tokenId = decoded?.tokenId;
+    if (!tokenId) {
+      return res.status(401).json({ error: 'Token missing session identifier, please re-login' });
+    }
+
+    db.get(
+      'SELECT * FROM sessions WHERE token_id = ? AND expires_at > datetime("now")',
+      [tokenId],
+      (sessionErr, session) => {
+        if (sessionErr || !session) {
+          return res.status(401).json({ error: 'Session expired or revoked, please re-login' });
+        }
+        req.user = decoded;
+        req.tokenId = tokenId;
+        next();
+      }
+    );
+  });
+};
+
+// GET /api/sessions - List active sessions for current user
+app.get('/api/sessions', authenticateTokenWithSession, (req, res) => {
+  db.all(
+    'SELECT id, token_id, ip_address, user_agent, created_at, expires_at FROM sessions WHERE user_id = ? AND expires_at > datetime("now") ORDER BY created_at DESC',
+    [req.user.id],
+    (err, sessions) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      const sessionList = sessions.map(s => ({
+        id: s.token_id,
+        sessionId: s.id,
+        ip_address: s.ip_address,
+        user_agent: s.user_agent,
+        created_at: s.created_at,
+        expires_at: s.expires_at,
+        isCurrent: s.token_id === req.tokenId
+      }));
+      res.json({ sessions: sessionList });
+    }
+  );
+});
+
+// DELETE /api/sessions/:tokenId - Revoke a specific session
+app.delete('/api/sessions/:tokenId', authenticateTokenWithSession, (req, res) => {
+  const { tokenId } = req.params;
+
+  db.run('DELETE FROM sessions WHERE token_id = ? AND user_id = ?', [tokenId, req.user.id], function (err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    res.json({ message: 'Session revoked' });
+  });
+});
+
+// DELETE /api/sessions - Revoke all sessions except current
+app.delete('/api/sessions', authenticateTokenWithSession, (req, res) => {
+  db.run(
+    'DELETE FROM sessions WHERE user_id = ? AND token_id != ?',
+    [req.user.id, req.tokenId],
+    function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ message: `Revoked ${this.changes} other session(s)`, revoked: this.changes });
+    }
+  );
+});
+
+// POST /api/change-password
+app.post('/api/change-password', authenticateTokenWithSession, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password required' });
+  }
+
+  const passwordValidation = validatePasswordStrength(newPassword);
+  if (!passwordValidation.valid) {
+    const missing = Object.entries(passwordValidation.checks)
+      .filter(([, ok]) => !ok)
+      .map(([name]) => name);
+    return res.status(400).json({
+      error: 'Password does not meet requirements',
+      requirements: passwordValidation.checks,
+      missing
+    });
+  }
+
+  db.get('SELECT * FROM users WHERE id = ?', [req.user.id], async (err, user) => {
+    if (err || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    try {
+      const validPassword = await bcrypt.compare(currentPassword, user.password);
+      if (!validPassword) {
+        return res.status(400).json({ error: 'Current password is incorrect' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, req.user.id], function (updateErr) {
+        if (updateErr) {
+          return res.status(500).json({ error: updateErr.message });
+        }
+        res.json({ message: 'Password changed successfully' });
+      });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -357,7 +547,7 @@ app.get('/api/products', (req, res) => {
 });
 
 // Export products to CSV or JSON
-app.get('/api/products/export', authenticateToken, (req, res) => {
+app.get('/api/products/export', authenticateTokenWithSession, (req, res) => {
   const {
     format = 'csv',
     search,
@@ -478,7 +668,7 @@ app.get('/api/products/:id', (req, res) => {
 });
 
 // Create product
-app.post('/api/products', authenticateToken, upload.single('image'), (req, res) => {
+app.post('/api/products', authenticateTokenWithSession, upload.single('image'), (req, res) => {
   const { name, category, price, description, rating, reviews, status, existing_image, meta_title, meta_description } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : (existing_image || null);
   const price_value = parsePriceToNumber(price);
@@ -522,7 +712,7 @@ app.post('/api/products', authenticateToken, upload.single('image'), (req, res) 
 });
 
 // Update product
-app.put('/api/products/:id', authenticateToken, upload.single('image'), (req, res) => {
+app.put('/api/products/:id', authenticateTokenWithSession, upload.single('image'), (req, res) => {
   const { name, category, price, description, rating, reviews, status, existing_image, meta_title, meta_description } = req.body;
   console.log(`[PUT /api/products/${req.params.id}] Body:`, {
     name, category, price, description, rating, reviews, status, meta_title, meta_description
@@ -583,7 +773,7 @@ app.put('/api/products/:id', authenticateToken, upload.single('image'), (req, re
 });
 
 // Delete product
-app.delete('/api/products/:id', authenticateToken, (req, res) => {
+app.delete('/api/products/:id', authenticateTokenWithSession, (req, res) => {
   const productId = req.params.id;
 
   // Get product to delete image file
@@ -621,7 +811,7 @@ app.delete('/api/products/:id', authenticateToken, (req, res) => {
 // ==================== ADVANCED PRODUCT OPERATIONS ====================
 
 // Bulk delete products
-app.post('/api/products/bulk-delete', authenticateToken, (req, res) => {
+app.post('/api/products/bulk-delete', authenticateTokenWithSession, (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: 'ids array is required' });
@@ -656,7 +846,7 @@ app.post('/api/products/bulk-delete', authenticateToken, (req, res) => {
 });
 
 // Bulk update products
-app.post('/api/products/bulk-update', authenticateToken, (req, res) => {
+app.post('/api/products/bulk-update', authenticateTokenWithSession, (req, res) => {
   const { ids, updates } = req.body;
   if (!Array.isArray(ids) || ids.length === 0 || !updates) {
     return res.status(400).json({ error: 'ids array and updates object are required' });
@@ -706,7 +896,7 @@ app.post('/api/products/bulk-update', authenticateToken, (req, res) => {
 });
 
 // Bulk price adjustment (percentage or fixed)
-app.post('/api/products/bulk-price-adjust', authenticateToken, (req, res) => {
+app.post('/api/products/bulk-price-adjust', authenticateTokenWithSession, (req, res) => {
   const { ids, adjustment } = req.body;
   if (!Array.isArray(ids) || ids.length === 0 || !adjustment) {
     return res.status(400).json({ error: 'ids array and adjustment object are required' });
@@ -784,7 +974,7 @@ app.post('/api/products/bulk-price-adjust', authenticateToken, (req, res) => {
 });
 
 // Duplicate product
-app.post('/api/products/:id/duplicate', authenticateToken, (req, res) => {
+app.post('/api/products/:id/duplicate', authenticateTokenWithSession, (req, res) => {
   const productId = req.params.id;
 
   db.get('SELECT * FROM products WHERE id = ?', [productId], (err, product) => {
@@ -825,7 +1015,7 @@ app.post('/api/products/:id/duplicate', authenticateToken, (req, res) => {
 });
 
 // Import products from CSV
-app.post('/api/products/import', authenticateToken, uploadCSV.single('file'), async (req, res) => {
+app.post('/api/products/import', authenticateTokenWithSession, uploadCSV.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -954,7 +1144,7 @@ app.get('/api/products/:id/preview', (req, res) => {
 // ==================== DASHBOARD API ====================
 
 // Get dashboard statistics with month-over-month comparisons
-app.get('/api/dashboard/stats', authenticateToken, (req, res) => {
+app.get('/api/dashboard/stats', authenticateTokenWithSession, (req, res) => {
   // Calculate date ranges for current and previous month
   const now = new Date();
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -1098,7 +1288,7 @@ app.get('/api/categories/:id', (req, res) => {
 });
 
 // Create category
-app.post('/api/categories', authenticateToken, (req, res) => {
+app.post('/api/categories', authenticateTokenWithSession, (req, res) => {
   const { name, slug, description, icon, color, sort_order, is_active } = req.body;
 
   if (!name || !slug) {
@@ -1133,7 +1323,7 @@ app.post('/api/categories', authenticateToken, (req, res) => {
 });
 
 // Update category
-app.put('/api/categories/:id', authenticateToken, (req, res) => {
+app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
   const { name, slug, description, icon, color, sort_order, is_active } = req.body;
   const categoryId = req.params.id;
 
@@ -1181,7 +1371,7 @@ app.put('/api/categories/:id', authenticateToken, (req, res) => {
 });
 
 // Delete category
-app.delete('/api/categories/:id', authenticateToken, (req, res) => {
+app.delete('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
   const categoryId = req.params.id;
 
   // Check if category has products
@@ -1203,7 +1393,7 @@ app.delete('/api/categories/:id', authenticateToken, (req, res) => {
 });
 
 // Reorder categories
-app.post('/api/categories/reorder', authenticateToken, (req, res) => {
+app.post('/api/categories/reorder', authenticateTokenWithSession, (req, res) => {
   const { categoryOrders } = req.body; // Array of { id, sort_order }
 
   if (!Array.isArray(categoryOrders)) {
@@ -1238,7 +1428,7 @@ app.post('/api/categories/reorder', authenticateToken, (req, res) => {
 // ==================== SETTINGS API ====================
 
 // Get all settings as key-value object
-app.get('/api/settings', authenticateToken, (req, res) => {
+app.get('/api/settings', authenticateTokenWithSession, (req, res) => {
   db.all('SELECT key, value FROM settings', [], (err, rows) => {
     if (err) {
       console.error('Error fetching settings:', err.message);
@@ -1253,7 +1443,7 @@ app.get('/api/settings', authenticateToken, (req, res) => {
 });
 
 // Update settings (bulk)
-app.put('/api/settings', authenticateToken, (req, res) => {
+app.put('/api/settings', authenticateTokenWithSession, (req, res) => {
   const updates = req.body; // Expecting { key: value, ... }
 
   if (!updates || typeof updates !== 'object') {
@@ -1294,7 +1484,7 @@ app.put('/api/settings', authenticateToken, (req, res) => {
 // ==================== MEDIA API ====================
 
 // Get all media (images from uploads folder)
-app.get('/api/media', authenticateToken, async (req, res) => {
+app.get('/api/media', authenticateTokenWithSession, async (req, res) => {
   const uploadsDir = path.join(__dirname, 'uploads');
 
   fs.readdir(uploadsDir, async (err, files) => {
@@ -1344,7 +1534,7 @@ app.get('/api/media', authenticateToken, async (req, res) => {
 });
 
 // Delete media file
-app.delete('/api/media/:filename', authenticateToken, (req, res) => {
+app.delete('/api/media/:filename', authenticateTokenWithSession, (req, res) => {
   const filename = req.params.filename;
   const filePath = path.join(__dirname, 'uploads', filename);
 
@@ -1385,7 +1575,7 @@ const uploadMultiple = multer({
   }
 }).array('images', 10); // Up to 10 images at once
 
-app.post('/api/media/upload', authenticateToken, (req, res) => {
+app.post('/api/media/upload', authenticateTokenWithSession, (req, res) => {
   uploadMultiple(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message });
@@ -1412,7 +1602,7 @@ app.post('/api/media/upload', authenticateToken, (req, res) => {
 });
 
 // Get unused images
-app.get('/api/media/unused', authenticateToken, (req, res) => {
+app.get('/api/media/unused', authenticateTokenWithSession, (req, res) => {
   const uploadsDir = path.join(__dirname, 'uploads');
 
   fs.readdir(uploadsDir, (err, files) => {

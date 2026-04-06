@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { format } from 'date-fns';
 import { Package, Tag, Star, MessageSquare, TrendingUp, Clock, AlertCircle } from 'lucide-react';
 import {
   BarChart,
@@ -14,6 +15,7 @@ import {
   Cell,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/common/Card';
+import { Button } from '@/components/ui/Button';
 import { dashboardService } from '@/services/api';
 import toast from 'react-hot-toast';
 
@@ -111,7 +113,7 @@ export const Dashboard: React.FC = () => {
 
   const COLORS = ['#D4AF37', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
-  if (isLoading && products.length === 0) {
+  if (isLoading && !stats) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>

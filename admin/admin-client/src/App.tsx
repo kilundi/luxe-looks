@@ -21,6 +21,7 @@ import toast from 'react-hot-toast';
 import { CategoriesPage } from '@/components/pages/CategoriesPage';
 import { MediaPage } from '@/components/pages/MediaPage';
 import { SettingsPage } from '@/components/pages/SettingsPage';
+import { SessionsPage } from '@/components/pages/SessionsPage';
 
 // Login Page Component
 const LoginPage = () => {
@@ -747,6 +748,7 @@ const App = () => {
           <Route path="categories" element={<CategoriesPage />} />
           <Route path="media" element={<MediaPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="sessions" element={<SessionsPage />} />
         </Route>
 
         {/* Catch all - redirect to admin */}

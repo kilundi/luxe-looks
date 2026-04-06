@@ -52,7 +52,43 @@ export const authService = {
     });
     return response.data;
   },
+
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    const response = await api.post<{ message: string }>('/change-password', {
+      currentPassword,
+      newPassword,
+    });
+    return response.data;
+  },
 };
+
+// Session services
+export const sessionService = {
+  getAll: async () => {
+    const response = await api.get<{ sessions: Session[] }>('/sessions');
+    return response.data;
+  },
+
+  revoke: async (tokenId: string) => {
+    const response = await api.delete<{ message: string }>(`/sessions/${tokenId}`);
+    return response.data;
+  },
+
+  revokeAllOthers: async () => {
+    const response = await api.delete<{ message: string; revoked: number }>('/sessions');
+    return response.data;
+  },
+};
+
+export interface Session {
+  id: string;
+  sessionId: number;
+  ip_address: string;
+  user_agent: string;
+  created_at: string;
+  expires_at: string;
+  isCurrent: boolean;
+}
 
 // Product services
 export const productService = {

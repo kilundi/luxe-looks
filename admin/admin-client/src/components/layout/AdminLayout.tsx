@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Menu,
   X,
+  Shield,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import logo from '/logo.png';
@@ -21,6 +22,7 @@ const navItems = [
   { to: '/admin/products', icon: Package, label: 'Products' },
   { to: '/admin/categories', icon: Tag, label: 'Categories' },
   { to: '/admin/media', icon: Image, label: 'Media Library' },
+  { to: '/admin/sessions', icon: Shield, label: 'Sessions' },
   { to: '/admin/settings', icon: Settings, label: 'Settings' },
 ];
 
