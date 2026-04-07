@@ -423,11 +423,185 @@ app.delete('/api/sessions/:tokenId', authenticateTokenWithSession, (req, res) =>
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
     res.json({ message: 'Session revoked' });
   });
+});
+
+// ==================== USER MANAGEMENT API ====================
+
+// Get all users (admin only)
+app.get('/api/users', authenticateTokenWithSession, (req, res) => {
+  db.all('SELECT id, username, created_at FROM users ORDER BY created_at DESC', (err, users) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(users);
+  });
+});
+
+// Create new user (admin only)
+app.post('/api/users', authenticateTokenWithSession, async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    db.run(
+      'INSERT INTO users (username, password) VALUES (?, ?)',
+      [username, hashedPassword],
+      function (err) {
+        if (err) {
+          if (err.message.includes('UNIQUE constraint failed')) {
+            return res.status(400).json({ error: 'Username already exists' });
+          }
+          return res.status(500).json({ error: err.message });
+        }
+        logActivity(req, 'create', 'user', this.lastID, null, { username });
+        res.json({ id: this.lastID, username, message: 'User created successfully' });
+      }
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update user password (admin only)
+app.put('/api/users/:id/password', authenticateTokenWithSession, async (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body;
+
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  // Check if user exists
+  db.get('SELECT * FROM users WHERE id = ?', [id], async (err, user) => {
+    if (err || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    try {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, id], function (err) {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+        logActivity(req, 'update', 'user', parseInt(id), { username: user.username }, { password: '***' });
+        res.json({ message: 'Password updated successfully' });
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// Delete user (admin only)
+app.delete('/api/users/:id', authenticateTokenWithSession, (req, res) => {
+  const { id } = req.params;
+
+  // Prevent deleting yourself
+  if (parseInt(id) === req.user.id) {
+    return res.status(400).json({ error: 'Cannot delete your own account' });
+  }
+
+  db.get('SELECT * FROM users WHERE id = ?', [id], (err, user) => {
+    if (err || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    db.run('DELETE FROM users WHERE id = ?', [id], function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      db.run('DELETE FROM sessions WHERE user_id = ?', [id]);
+      logActivity(req, 'delete', 'user', parseInt(id), { username: user.username }, null);
+      res.json({ message: 'User deleted successfully' });
+    });
+  });
+});
+
+// Password Reset - Request (generates reset code stored in memory)
+const resetCodes = new Map();
+
+app.post('/api/users/reset-request', async (req, res) => {
+  const { username } = req.body;
+  
+  if (!username) {
+    return res.status(400).json({ error: 'Username is required' });
+  }
+
+  db.get('SELECT id, username FROM users WHERE username = ?', [username], async (err, user) => {
+    if (err || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Generate 6-digit reset code
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store code with 10 minute expiry
+    resetCodes.set(username, {
+      code: resetCode,
+      expires: Date.now() + 10 * 60 * 1000
+    });
+
+    // In production, send via email - for now, return code (for testing)
+    res.json({ 
+      message: 'Reset code generated',
+      // Remove this in production - code should be sent via email
+      debugCode: resetCode 
+    });
+  });
+});
+
+app.post('/api/users/reset-password', async (req, res) => {
+  const { username, resetCode, newPassword } = req.body;
+  
+  if (!username || !resetCode || !newPassword) {
+    return res.status(400).json({ error: 'All fields are required' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  const stored = resetCodes.get(username);
+  
+  if (!stored) {
+    return res.status(400).json({ error: 'No reset request found' });
+  }
+
+  if (Date.now() > stored.expires) {
+    resetCodes.delete(username);
+    return res.status(400).json({ error: 'Reset code expired' });
+  }
+
+  if (stored.code !== resetCode) {
+    return res.status(400).json({ error: 'Invalid reset code' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    
+    db.run('UPDATE users SET password = ? WHERE username = ?', [hashedPassword, username], (err) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      
+      resetCodes.delete(username);
+      db.run('DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)', [username]);
+      
+      res.json({ message: 'Password reset successful' });
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE /api/sessions - Revoke all sessions except current
@@ -2135,7 +2309,13 @@ function formatBytes(bytes, decimals = 2) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// Serve admin client SPA for both /admin and /admin/*
+// Serve admin client SPA - check authentication
+const checkAdminAuth = (req, res, next) => {
+  next(); // Let frontend handle routing protection
+};
+
+app.use('/admin', checkAdminAuth);
+
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });

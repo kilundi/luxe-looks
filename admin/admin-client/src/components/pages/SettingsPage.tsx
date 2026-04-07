@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings as SettingsIcon, Save, Upload, Database, Bell, Shield, Globe } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Upload, Database, Bell, Shield, Globe, Users, Trash2, Plus, Key } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/common/Card';
 import { Button } from '@/components/ui/Button';
 import toast from 'react-hot-toast';
-import { settingsService } from '@/services/api';
+import { settingsService, userService } from '@/services/api';
 
 interface SettingsState {
   site_name: string;
@@ -72,10 +72,18 @@ export const SettingsPage: React.FC = () => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
+  // User management state
+  const [users, setUsers] = useState<{ id: number; username: string; created_at: string }[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<{ id: number; username: string } | null>(null);
+  const [newUserData, setNewUserData] = useState({ username: '', password: '' });
+
   const tabs = [
     { id: 'general', label: 'General', icon: Globe },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
+    { id: 'users', label: 'Users', icon: Users },
     { id: 'backup', label: 'Backup', icon: Database },
   ];
 
@@ -113,7 +121,60 @@ export const SettingsPage: React.FC = () => {
     if (activeTab === 'backup' && !systemStatus) {
       fetchSystemStatus();
     }
+    if (activeTab === 'users') {
+      fetchUsers();
+    }
   }, [activeTab]);
+
+  const fetchUsers = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const data = await userService.getAll();
+      setUsers(data);
+    } catch (error: any) {
+      console.error('Failed to fetch users:', error);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await userService.create(newUserData.username, newUserData.password);
+      toast.success('User created successfully');
+      setShowUserModal(false);
+      setNewUserData({ username: '', password: '' });
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to create user');
+    }
+  };
+
+  const handleUpdatePassword = async (userId: number) => {
+    const password = prompt('Enter new password:');
+    if (!password || password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    try {
+      await userService.updatePassword(userId, password);
+      toast.success('Password updated successfully');
+    } catch (error: any) {
+      toast.error('Failed to update password');
+    }
+  };
+
+  const handleDeleteUser = async (userId: number, username: string) => {
+    if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
+    try {
+      await userService.delete(userId);
+      toast.success('User deleted successfully');
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to delete user');
+    }
+  };
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -509,6 +570,53 @@ export const SettingsPage: React.FC = () => {
             </motion.div>
           )}
 
+          {activeTab === 'users' && (
+            <motion.div
+              key="users"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle>Admin Users</CardTitle>
+                  <Button leftIcon={<Plus size={18} />} onClick={() => setShowUserModal(true)}>
+                    Add User
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingUsers ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+                    </div>
+                  ) : users.length === 0 ? (
+                    <p className="text-dark-400 text-center py-8">No users found</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {users.map((user) => (
+                        <div key={user.id} className="flex items-center justify-between p-4 bg-dark-900 rounded-lg">
+                          <div>
+                            <p className="text-white font-medium">{user.username}</p>
+                            <p className="text-dark-400 text-sm">Created: {new Date(user.created_at).toLocaleDateString()}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button variant="secondary" size="sm" leftIcon={<Key size={16} />} onClick={() => handleUpdatePassword(user.id)}>
+                              Reset Password
+                            </Button>
+                            <Button variant="danger" size="sm" leftIcon={<Trash2 size={16} />} onClick={() => handleDeleteUser(user.id, user.username)}>
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
           {activeTab === 'backup' && (
             <motion.div
               key="backup"
@@ -669,6 +777,56 @@ export const SettingsPage: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Add User Modal */}
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-dark-900 rounded-2xl border border-dark-800 w-full max-w-md"
+          >
+            <div className="p-6 border-b border-dark-800">
+              <h2 className="text-2xl font-serif font-bold text-white">Add New User</h2>
+            </div>
+            <form onSubmit={handleCreateUser}>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">Username</label>
+                  <input
+                    type="text"
+                    value={newUserData.username}
+                    onChange={(e) => setNewUserData({ ...newUserData, username: e.target.value })}
+                    className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder="Enter username"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">Password</label>
+                  <input
+                    type="password"
+                    value={newUserData.password}
+                    onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
+                    className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder="Enter password (min 6 chars)"
+                    minLength={6}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="p-6 border-t border-dark-800 flex justify-end gap-3">
+                <Button type="button" variant="secondary" onClick={() => setShowUserModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Create User
+                </Button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
   );
 };

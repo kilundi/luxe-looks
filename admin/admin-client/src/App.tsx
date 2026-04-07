@@ -28,11 +28,19 @@ import { ActivityLogPage } from '@/components/pages/ActivityLogPage';
 const LoginPage = () => {
   const [username, setUsername] = React.useState('');
   const [password, setPassword] = React.useState('');
+  const [showForgotPassword, setShowForgotPassword] = React.useState(false);
+  const [resetUsername, setResetUsername] = React.useState('');
+  const [resetCode, setResetCode] = React.useState('');
+  const [newPassword, setNewPassword] = React.useState('');
+  const [resetStep, setResetStep] = React.useState(1);
+  const [resetError, setResetError] = React.useState('');
+  const [resetSuccess, setResetSuccess] = React.useState(false);
+  const [isResetting, setIsResetting] = React.useState(false);
+
   const { login, isLoading, error, clearError } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Get redirect path from location state, default to /admin
   const from = location.state?.from?.pathname || '/admin';
 
   React.useEffect(() => {
@@ -47,6 +55,152 @@ const LoginPage = () => {
       navigate(from, { replace: true });
     }
   };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsResetting(true);
+    setResetError('');
+
+    try {
+      const res = await fetch('http://localhost:3001/api/users/reset-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: resetUsername }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setResetError(data.error || 'Failed to process request');
+        return;
+      }
+
+      setResetStep(2);
+    } catch (err) {
+      setResetError('Network error. Please try again.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsResetting(true);
+    setResetError('');
+
+    try {
+      const res = await fetch('http://localhost:3001/api/users/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: resetUsername, resetCode, newPassword }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setResetError(data.error || 'Failed to reset password');
+        return;
+      }
+
+      setResetSuccess(true);
+      setTimeout(() => {
+        setShowForgotPassword(false);
+        setResetStep(1);
+        setResetUsername('');
+        setResetCode('');
+        setNewPassword('');
+        setResetSuccess(false);
+      }, 3000);
+    } catch (err) {
+      setResetError('Network error. Please try again.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const resetModal = (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-dark-900 rounded-2xl border border-dark-800 w-full max-w-md p-6">
+        <h2 className="text-2xl font-serif font-bold text-white mb-4">
+          {resetStep === 1 ? 'Reset Password' : 'Enter New Password'}
+        </h2>
+
+        {resetSuccess ? (
+          <div className="text-center py-6">
+            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">✓</span>
+            </div>
+            <p className="text-green-400 text-lg mb-2">Password reset successful!</p>
+            <p className="text-dark-400 text-sm">You can now login with your new password.</p>
+          </div>
+        ) : (
+          <form onSubmit={resetStep === 1 ? handleForgotPassword : handleResetPassword} className="space-y-4">
+            {resetStep === 1 ? (
+              <div>
+                <label className="block text-sm font-medium text-dark-300 mb-2">Username</label>
+                <input
+                  type="text"
+                  value={resetUsername}
+                  onChange={(e) => setResetUsername(e.target.value)}
+                  className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg text-white"
+                  placeholder="Enter your username"
+                  required
+                />
+                <p className="text-dark-400 text-xs mt-2">Contact admin for reset code</p>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">Reset Code</label>
+                  <input
+                    type="text"
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value)}
+                    className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg text-white"
+                    placeholder="Enter reset code"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">New Password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg text-white"
+                    placeholder="New password (min 6 chars)"
+                    minLength={6}
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            {resetError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                {resetError}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setShowForgotPassword(false); setResetStep(1); setResetUsername(''); setResetError(''); }}
+                className="flex-1 py-3 px-4 bg-dark-800 hover:bg-dark-700 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isResetting}
+                className="flex-1 py-3 px-4 bg-primary-500 hover:bg-primary-600 disabled:bg-primary-500/50 text-white font-semibold rounded-lg transition-colors"
+              >
+                {isResetting ? 'Processing...' : resetStep === 1 ? 'Verify' : 'Reset Password'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-dark-950 via-dark-900 to-dark-950 p-4">
@@ -111,9 +265,20 @@ const LoginPage = () => {
                 'Sign In'
               )}
             </button>
+
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="text-sm text-dark-400 hover:text-primary-400 transition-colors"
+              >
+                Forgot Password?
+              </button>
+            </div>
           </form>
         </div>
       </div>
+      {showForgotPassword && resetModal}
     </div>
   );
 };

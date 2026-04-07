@@ -331,4 +331,27 @@ export const activityLogService = {
   },
 };
 
+// User management service
+export const userService = {
+  getAll: async () => {
+    const response = await api.get<{ id: number; username: string; created_at: string }[]>('/users');
+    return response.data;
+  },
+
+  create: async (username: string, password: string) => {
+    const response = await api.post<{ id: number; username: string; message: string }>('/users', { username, password });
+    return response.data;
+  },
+
+  updatePassword: async (userId: number, password: string) => {
+    const response = await api.put<{ message: string }>(`/users/${userId}/password`, { password });
+    return response.data;
+  },
+
+  delete: async (userId: number) => {
+    const response = await api.delete<{ message: string }>(`/users/${userId}`);
+    return response.data;
+  },
+};
+
 export default api;
