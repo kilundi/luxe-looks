@@ -3,6 +3,9 @@ import { Truck, Shield, Clock, Award, MapPin } from 'lucide-react';
 
 const About = ({ siteSettings }) => {
   const whatsapp = siteSettings?.whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
+  const map_embed_about = siteSettings?.map_embed_about || '';
+  const delivery_map_title = siteSettings?.delivery_map_title || 'Where to Find Us / Delivery Coverage';
+  const delivery_map_subtitle = siteSettings?.delivery_map_subtitle || 'We deliver to all major towns across Kenya including Nairobi, Mombasa, Kisumu, Nakuru, Eldoret, and more. Stay updated on our social media for occasional pop-up events!';
   const features = [
     {
       icon: Truck,
@@ -132,25 +135,31 @@ const About = ({ siteSettings }) => {
             className="text-center"
           >
             <h3 className="text-3xl font-serif font-bold text-accent mb-6">
-              Where to Find Us / Delivery Coverage
+              {delivery_map_title}
             </h3>
             <p className="text-gray-300 max-w-2xl mx-auto mb-10 leading-relaxed">
-              We deliver to all major towns across Kenya including Nairobi, Mombasa, Kisumu, Nakuru, Eldoret, and more. Stay updated on our social media for occasional pop-up events!
+              {delivery_map_subtitle}
             </p>
 
             {/* Embedded Map */}
-            <div className="max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl border border-gray-800">
-              <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d5174.214801657642!2d37.6571884749646!3d-0.3202621996765874!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x1827b9216a3cab59%3A0x3c80e80a69b272d1!2sLuxe%20Looks%20Beauty%20and%20Cosmetics%2C%20Kenya!5e1!3m2!1sen!2ske!4v1775304808462!5m2!1sen!2ske"
-                width="100%"
-                height="400"
-                style={{ border: 0 }}
-                allowFullScreen=""
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title="Luxe Looks Beauty and Cosmetics Kenya Location"
-              />
-            </div>
+            {map_embed_about ? (
+              <div className="max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl border border-gray-800">
+                <iframe
+                  src={map_embed_about}
+                  width="100%"
+                  height="400"
+                  style={{ border: 0 }}
+                  allowFullScreen=""
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Luxe Looks Beauty and Cosmetics Kenya Location"
+                />
+              </div>
+            ) : (
+              <div className="max-w-4xl mx-auto rounded-2xl bg-gray-900 h-[400px] flex items-center justify-center">
+                <p className="text-gray-500">No map configured</p>
+              </div>
+            )}
           </motion.div>
         </div>
       </div>

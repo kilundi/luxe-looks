@@ -8,6 +8,15 @@ const Navigation = ({ siteSettings }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const whatsapp = siteSettings?.whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
+  const siteName = siteSettings?.site_name || 'Luxe Looks';
+  const logoUrl = siteSettings?.logo || null;
+  const API_URL = 'http://localhost:3001';
+
+  const getLogoSrc = () => {
+    if (!logoUrl) return logo;
+    if (logoUrl.startsWith('http')) return logoUrl;
+    return `${API_URL}${logoUrl}`;
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -49,17 +58,20 @@ const Navigation = ({ siteSettings }) => {
       >
         <div className="container-custom">
           <div className="flex items-center justify-between">
-            {/* Logo */}
+            {/* Logo & Site Name */}
             <a
               href="#home"
               onClick={(e) => scrollToSection(e, '#home')}
-              className="flex items-center"
+              className="flex items-center gap-3"
             >
               <img
-                src={logo}
-                alt="Luxe Looks Beauty & Cosmetics KE"
+                src={getLogoSrc()}
+                alt={siteName}
                 className="h-12 md:h-14 w-auto"
               />
+              <span className="hidden lg:block text-xl font-serif font-bold text-primary tracking-wide">
+                {siteName}
+              </span>
             </a>
 
             {/* Desktop Navigation */}

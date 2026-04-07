@@ -16,6 +16,7 @@ import ScrollProgress from './components/ScrollProgress';
 import './index.css';
 
 const API_URL = 'http://localhost:3001/api';
+const ASSETS_URL = 'http://localhost:3001';
 
 function App() {
   const [siteSettings, setSiteSettings] = useState({
@@ -27,7 +28,23 @@ function App() {
     facebook: '',
     instagram: '',
     twitter: '',
+    logo: '',
+    favicon: '',
   });
+
+  const getFaviconUrl = () => {
+    const favicon = siteSettings.favicon;
+    if (!favicon) return '/favicon.ico';
+    if (favicon.startsWith('http')) return favicon;
+    return `${ASSETS_URL}${favicon}`;
+  };
+
+  const getLogoUrl = () => {
+    const logo = siteSettings.logo;
+    if (!logo) return undefined;
+    if (logo.startsWith('http')) return logo;
+    return `${ASSETS_URL}${logo}`;
+  };
 
   const [categories, setCategories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -77,6 +94,8 @@ function App() {
             content="Premium beauty products delivered across Kenya. Join our WhatsApp community for exclusive deals!"
           />
           <link rel="canonical" href="https://luxelooks.co.ke" />
+          <link rel="icon" href={getFaviconUrl()} />
+          {getLogoUrl() && <meta property="og:image" content={getLogoUrl()} />}
         </Helmet>
 
         <SkipToContent />

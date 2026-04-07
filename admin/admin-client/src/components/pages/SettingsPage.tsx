@@ -17,8 +17,16 @@ interface SettingsState {
   instagram: string;
   twitter: string;
   whatsapp: string;
+  tiktok: string;
+  footer_description: string;
   session_timeout: string;
   rate_limit_requests: string;
+  map_embed_contact: string;
+  contact_map_title: string;
+  contact_map_subtitle: string;
+  map_embed_about: string;
+  delivery_map_title: string;
+  delivery_map_subtitle: string;
 }
 
 interface SystemStatus {
@@ -42,8 +50,16 @@ const DEFAULT_SETTINGS: SettingsState = {
   instagram: '',
   twitter: '',
   whatsapp: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+  tiktok: '',
+  footer_description: '',
   session_timeout: '1440',
   rate_limit_requests: '1000',
+  map_embed_contact: '',
+  contact_map_title: '',
+  contact_map_subtitle: '',
+  map_embed_about: '',
+  delivery_map_title: '',
+  delivery_map_subtitle: '',
 };
 
 export const SettingsPage: React.FC = () => {
@@ -234,25 +250,89 @@ export const SettingsPage: React.FC = () => {
                 <CardHeader>
                   <CardTitle>Branding</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-6">
                   <div>
                     <label className="block text-sm font-medium text-dark-300 mb-2">
                       Logo
                     </label>
-                    <div className="border-2 border-dashed border-dark-700 rounded-lg p-6 text-center">
-                      <Upload className="mx-auto h-12 w-12 text-dark-500 mb-3" />
-                      <p className="text-sm text-dark-400">Click to upload or drag and drop</p>
-                      <p className="text-xs text-dark-500 mt-1">SVG, PNG, JPG up to 2MB</p>
+                    <div className="flex items-center gap-4">
+                      <div className="w-24 h-24 rounded-lg border-2 border-dark-700 bg-dark-800 flex items-center justify-center overflow-hidden">
+                        {settings.logo ? (
+                          <img 
+                            src={`http://localhost:3001${settings.logo}`} 
+                            alt="Logo" 
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <Upload className="h-8 w-8 text-dark-500" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                              const result = await settingsService.uploadLogo(file, 'logo');
+                              setSettings(prev => ({ ...prev, logo: result.logo }));
+                              toast.success('Logo uploaded successfully');
+                            } catch (error) {
+                              toast.error('Failed to upload logo');
+                            }
+                          }}
+                          className="hidden"
+                          id="logo-upload"
+                        />
+                        <label htmlFor="logo-upload" className="inline-flex items-center gap-2 px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white cursor-pointer hover:bg-dark-700 transition-colors">
+                          <Upload size={16} />
+                          Upload Logo
+                        </label>
+                        <p className="text-xs text-dark-500 mt-2">PNG, JPG up to 2MB</p>
+                      </div>
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-dark-300 mb-2">
                       Favicon
                     </label>
-                    <div className="border-2 border-dashed border-dark-700 rounded-lg p-6 text-center">
-                      <Upload className="mx-auto h-12 w-12 text-dark-500 mb-3" />
-                      <p className="text-sm text-dark-400">Click to upload icon</p>
-                      <p className="text-xs text-dark-500 mt-1">ICO, PNG up to 1MB</p>
+                    <div className="flex items-center gap-4">
+                      <div className="w-16 h-16 rounded-lg border-2 border-dark-700 bg-dark-800 flex items-center justify-center overflow-hidden">
+                        {settings.favicon ? (
+                          <img 
+                            src={`http://localhost:3001${settings.favicon}`} 
+                            alt="Favicon" 
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <Upload className="h-6 w-6 text-dark-500" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                              const result = await settingsService.uploadLogo(file, 'favicon');
+                              setSettings(prev => ({ ...prev, favicon: result.favicon }));
+                              toast.success('Favicon uploaded successfully');
+                            } catch (error) {
+                              toast.error('Failed to upload favicon');
+                            }
+                          }}
+                          className="hidden"
+                          id="favicon-upload"
+                        />
+                        <label htmlFor="favicon-upload" className="inline-flex items-center gap-2 px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white cursor-pointer hover:bg-dark-700 transition-colors">
+                          <Upload size={16} />
+                          Upload Favicon
+                        </label>
+                        <p className="text-xs text-dark-500 mt-2">ICO, PNG up to 1MB</p>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -308,6 +388,38 @@ export const SettingsPage: React.FC = () => {
                       value={settings.twitter}
                       onChange={(e) => handleSettingChange('twitter', e.target.value)}
                       placeholder="https://x.com/..."
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      TikTok
+                    </label>
+                    <input
+                      type="url"
+                      value={settings.tiktok}
+                      onChange={(e) => handleSettingChange('tiktok', e.target.value)}
+                      placeholder="https://tiktok.com/@..."
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Footer Description</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Brand Description
+                    </label>
+                    <textarea
+                      value={settings.footer_description}
+                      onChange={(e) => handleSettingChange('footer_description', e.target.value)}
+                      rows={3}
+                      placeholder="Timeless beauty, modern elegance..."
                       className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
                   </div>

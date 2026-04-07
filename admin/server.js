@@ -190,6 +190,30 @@ const storage = multer.diskStorage({
   }
 });
 
+// Logo/Favicon upload config
+const logoStorage = multer.diskStorage({
+  destination: './uploads/',
+  filename: (req, file, cb) => {
+    const fieldname = file.fieldname === 'favicon' ? 'favicon' : 'logo';
+    const ext = path.extname(file.originalname);
+    cb(null, fieldname + ext);
+  }
+});
+
+const uploadLogo = multer({
+  storage: logoStorage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp|ico/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error('Only image files are allowed'));
+  }
+});
+
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
@@ -1611,6 +1635,29 @@ app.put('/api/settings', authenticateTokenWithSession, (req, res) => {
 });
 
 // ==================== SETTINGS API - SYSTEM ====================
+
+// Upload logo or favicon
+app.post('/api/settings/upload-logo', authenticateTokenWithSession, uploadLogo.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  
+  const type = req.body.type || 'logo';
+  const filePath = `/uploads/${req.file.filename}`;
+  
+  // Update settings with the file path
+  db.run(
+    'INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+    [type, filePath],
+    function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      logActivity(req, 'update', 'setting', null, null, { [type]: filePath });
+      res.json({ [type]: filePath, message: `${type} uploaded successfully` });
+    }
+  );
+});
 
 // Get system status info
 app.get('/api/settings/system-status', authenticateTokenWithSession, (req, res) => {

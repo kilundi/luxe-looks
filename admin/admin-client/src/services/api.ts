@@ -257,6 +257,16 @@ export const settingsService = {
     return response.data;
   },
 
+  uploadLogo: async (file: File, type: 'logo' | 'favicon') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', type);
+    const response = await api.post<{ [type]: string; message: string }>('/settings/upload-logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
   getSystemStatus: async () => {
     const response = await api.get<{
       database_size: number;

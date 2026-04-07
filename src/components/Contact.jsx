@@ -10,6 +10,10 @@ const Contact = ({ siteSettings }) => {
     facebook = '',
     instagram = '',
     twitter = '',
+    tiktok = '',
+    map_embed_contact = '',
+    contact_map_title = 'Find Us',
+    contact_map_subtitle = 'Based in Nairobi, we deliver across Kenya. Visit us virtually or come by for a pop-up event!',
   } = siteSettings || {};
 
   const socialLinks = [
@@ -22,7 +26,7 @@ const Contact = ({ siteSettings }) => {
     {
       name: 'TikTok',
       icon: Video,
-      url: 'https://www.tiktok.com/@luxe.looks.beautyke26',
+      url: tiktok || 'https://www.tiktok.com/@luxe.looks.beautyke26',
       color: 'from-pink-500 to-black',
     },
     {
@@ -326,25 +330,31 @@ const Contact = ({ siteSettings }) => {
             className="space-y-6"
           >
             <h3 className="text-2xl font-serif font-bold text-secondary">
-              Find Us
+              {contact_map_title}
             </h3>
             <p className="text-gray-600">
-              Based in Nairobi, we deliver across Kenya. Visit us virtually or come by for a pop-up event!
+              {contact_map_subtitle}
             </p>
 
-            <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
-              <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d5174.214801657642!2d37.6571884749646!3d-0.3202621996765874!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x1827b9216a3cab59%3A0x3c80e80a69b272d1!2sLuxe%20Looks%20Beauty%20and%20Cosmetics%2C%20Kenya!5e1!3m2!1sen!2ske!4v1775304808462!5m2!1sen!2ske"
-                width="100%"
-                height="450"
-                style={{ border: 0 }}
-                allowFullScreen=""
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title="Luxe Looks Beauty and Cosmetics Kenya Location"
-                className="block"
-              />
-            </div>
+            {map_embed_contact ? (
+              <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
+                <iframe
+                  src={map_embed_contact}
+                  width="100%"
+                  height="450"
+                  style={{ border: 0 }}
+                  allowFullScreen=""
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Luxe Looks Beauty and Cosmetics Kenya Location"
+                  className="block"
+                />
+              </div>
+            ) : (
+              <div className="bg-gray-100 rounded-2xl h-[450px] flex items-center justify-center">
+                <p className="text-gray-500">No map configured</p>
+              </div>
+            )}
 
             <p className="text-sm text-gray-500 italic">
               Note: We're an online-first store. This map shows our delivery coverage area in Nairobi and across Kenya. Visit our WhatsApp community for real-time updates on pop-up locations.

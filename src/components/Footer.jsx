@@ -4,7 +4,20 @@ import PaymentMethods from './PaymentMethods';
 
 const Footer = ({ siteSettings }) => {
   const currentYear = new Date().getFullYear();
-  const { phone_number = '', contact_email = '', whatsapp = 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK', site_name = 'Luxe Looks' } = siteSettings || {};
+  const { phone_number = '', contact_email = '', whatsapp = 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK', site_name = 'Luxe Looks', logo = '', footer_description = 'Timeless beauty, modern elegance. Your destination for premium beauty and luxury products in Kenya.', instagram = '', tiktok = '', facebook = '' } = siteSettings || {};
+  const API_URL = 'http://localhost:3001';
+
+  const getLogoSrc = () => {
+    if (!logo) return logo;
+    if (logo.startsWith('http')) return logo;
+    return `${API_URL}${logo}`;
+  };
+
+  const socialLinks = [
+    { name: 'Instagram', icon: Heart, url: instagram || 'https://www.instagram.com/luxe_looks15' },
+    { name: 'TikTok', icon: Video, url: tiktok || 'https://www.tiktok.com/@luxe.looks.beautyke26' },
+    { name: 'WhatsApp', icon: MessageCircle, url: whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK' },
+  ];
 
   const quickLinks = [
     { name: 'Home', href: '#home' },
@@ -23,32 +36,6 @@ const Footer = ({ siteSettings }) => {
     { name: 'Jewelry', href: '#collections' },
   ];
 
-  const socialLinks = [
-    {
-      name: 'Instagram',
-      icon: Camera,
-      url: 'https://www.instagram.com/luxe_looks15',
-    },
-    {
-      name: 'TikTok',
-      icon: Video,
-      url: 'https://www.tiktok.com/@luxe.looks.beautyke26',
-    },
-    {
-      name: 'WhatsApp',
-      icon: MessageCircle,
-      url: whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
-    },
-  ];
-
-  const scrollToSection = (e, href) => {
-    e.preventDefault();
-    const element = document.querySelector(href);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
   return (
     <footer className="bg-secondary text-accent">
       <div className="container-custom section pt-16 pb-8">
@@ -56,12 +43,12 @@ const Footer = ({ siteSettings }) => {
           {/* Brand Column */}
           <div className="space-y-6">
             <img
-              src={logo}
-              alt="Luxe Looks Beauty & Cosmetics KE"
+              src={getLogoSrc()}
+              alt={site_name}
               className="h-16 w-auto"
             />
             <p className="text-gray-400 leading-relaxed">
-              Timeless beauty, modern elegance. Your destination for premium beauty and luxury products in Kenya.
+              {footer_description}
             </p>
 
             {/* Social Icons */}
