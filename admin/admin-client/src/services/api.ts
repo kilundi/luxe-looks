@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Product, User, DashboardStats, ProductFilters, Category, MediaItem, CategoryOrder } from '@/types';
+import type { Product, User, DashboardStats, ProductFilters, Category, MediaItem, CategoryOrder, ActivityLog, ActivityLogFilters } from '@/types';
 
 const API_URL = '/api';
 
@@ -254,6 +254,71 @@ export const settingsService = {
 
   update: async (settings: Record<string, string>) => {
     const response = await api.put<{ message: string }>('/settings', settings);
+    return response.data;
+  },
+
+  getSystemStatus: async () => {
+    const response = await api.get<{
+      database_size: number;
+      database_size_formatted: string;
+      uploads_size: number;
+      uploads_size_formatted: string;
+      active_sessions: number;
+      uptime_seconds: number;
+      uptime_formatted: string;
+      sqlite_version: string;
+      node_version: string;
+      product_count: number;
+    }>('/settings/system-status');
+    return response.data;
+  },
+
+  downloadBackup: async () => {
+    const response = await api.get('/settings/backup', {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
+  restoreBackup: async (file: File) => {
+    const formData = new FormData();
+    formData.append('backup', file);
+    const response = await api.post<{ message: string }>('/settings/restore', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+};
+
+// Activity Log service
+export const activityLogService = {
+  getAll: async (filters?: ActivityLogFilters) => {
+    const params = new URLSearchParams();
+    if (filters) {
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== '' && value !== null) {
+          params.append(key, String(value));
+        }
+      });
+    }
+    const response = await api.get<{ items: ActivityLog[]; total: number; page: number; limit: number; totalPages: number }>(`/activity-logs?${params.toString()}`);
+    return response.data;
+  },
+
+  exportLogs: async (dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.append('dateFrom', dateFrom);
+    if (dateTo) params.append('dateTo', dateTo);
+    const response = await api.get(`/activity-logs/export?${params.toString()}`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
+  cleanup: async (days: number = 90) => {
+    const response = await api.delete<{ message: string; deletedCount: number }>('/activity-logs/cleanup', {
+      data: { days },
+    });
     return response.data;
   },
 };

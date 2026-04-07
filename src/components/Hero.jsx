@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
 import { ArrowRight, MessageCircle } from 'lucide-react';
 
-const Hero = () => {
+const Hero = ({ siteSettings }) => {
+  const { whatsapp = '' } = siteSettings || {};
   return (
     <section
       id="home"
@@ -48,7 +49,7 @@ const Hero = () => {
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
             <a
-              href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+              href={whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK'}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-primary flex items-center gap-3 text-lg w-full sm:w-auto justify-center"

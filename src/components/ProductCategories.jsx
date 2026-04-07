@@ -1,7 +1,10 @@
 import { motion } from 'framer-motion';
 import { ShoppingBag, Watch, Gem, Sparkles, Heart, MessageCircle } from 'lucide-react';
 
-const ProductCategories = () => {
+const ProductCategories = ({ siteSettings }) => {
+  const { whatsapp = '' } = siteSettings || {};
+  const waLink = whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
+
   const categories = [
     {
       id: 1,
@@ -11,7 +14,7 @@ const ProductCategories = () => {
       icon: Sparkles,
       color: 'from-amber-600 to-yellow-600',
       bgColor: 'bg-gradient-to-br from-amber-50 to-yellow-50',
-      link: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      link: waLink,
     },
     {
       id: 2,
@@ -21,7 +24,7 @@ const ProductCategories = () => {
       icon: Heart,
       color: 'from-pink-500 to-rose-500',
       bgColor: 'bg-gradient-to-br from-pink-50 to-rose-50',
-      link: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      link: waLink,
     },
     {
       id: 3,
@@ -31,7 +34,7 @@ const ProductCategories = () => {
       icon: Sparkles,
       color: 'from-amber-800 to-amber-600',
       bgColor: 'bg-gradient-to-br from-amber-50 to-orange-50',
-      link: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      link: waLink,
     },
     {
       id: 4,
@@ -41,7 +44,7 @@ const ProductCategories = () => {
       icon: ShoppingBag,
       color: 'from-stone-600 to-gray-600',
       bgColor: 'bg-gradient-to-br from-stone-50 to-gray-50',
-      link: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      link: waLink,
     },
     {
       id: 5,
@@ -51,7 +54,7 @@ const ProductCategories = () => {
       icon: Watch,
       color: 'from-blue-600 to-slate-600',
       bgColor: 'bg-gradient-to-br from-blue-50 to-slate-50',
-      link: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      link: waLink,
     },
     {
       id: 6,
@@ -61,7 +64,7 @@ const ProductCategories = () => {
       icon: Gem,
       color: 'from-yellow-500 to-amber-500',
       bgColor: 'bg-gradient-to-br from-yellow-50 to-amber-50',
-      link: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      link: waLink,
     },
   ];
 

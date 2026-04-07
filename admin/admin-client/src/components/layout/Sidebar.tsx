@@ -9,6 +9,8 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  History,
+  Clock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import logo from '/logo.png';
@@ -23,6 +25,8 @@ const navItems = [
   { to: '/admin/products', icon: Package, label: 'Products' },
   { to: '/admin/categories', icon: Tag, label: 'Categories' },
   { to: '/admin/media', icon: Image, label: 'Media Library' },
+  { to: '/admin/sessions', icon: Clock, label: 'Sessions' },
+  { to: '/admin/activity-logs', icon: History, label: 'Activity Logs' },
   { to: '/admin/settings', icon: Settings, label: 'Settings' },
 ];
 

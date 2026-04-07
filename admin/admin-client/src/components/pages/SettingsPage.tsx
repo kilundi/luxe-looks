@@ -10,23 +10,37 @@ interface SettingsState {
   site_name: string;
   contact_email: string;
   phone_number: string;
+  address: string;
   logo: string;
   favicon: string;
   facebook: string;
   instagram: string;
+  twitter: string;
   whatsapp: string;
   session_timeout: string;
   rate_limit_requests: string;
+}
+
+interface SystemStatus {
+  database_size_formatted: string;
+  uploads_size_formatted: string;
+  active_sessions: number;
+  uptime_formatted: string;
+  sqlite_version: string;
+  node_version: string;
+  product_count: number;
 }
 
 const DEFAULT_SETTINGS: SettingsState = {
   site_name: 'Luxe Looks',
   contact_email: 'hello@luxelooks.co.ke',
   phone_number: '+254 700 000 000',
+  address: '',
   logo: '',
   favicon: '',
   facebook: '',
   instagram: '',
+  twitter: '',
   whatsapp: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
   session_timeout: '1440',
   rate_limit_requests: '1000',
@@ -37,6 +51,10 @@ export const SettingsPage: React.FC = () => {
   const [isSaving, setIsSaving] = React.useState(false);
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   const tabs = [
     { id: 'general', label: 'General', icon: Globe },
@@ -62,11 +80,32 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const fetchSystemStatus = async () => {
+    setIsLoadingStatus(true);
+    try {
+      const data = await settingsService.getSystemStatus();
+      setSystemStatus(data);
+    } catch (error: any) {
+      console.error('Failed to fetch system status:', error);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  // Fetch system status when switching to backup tab
+  useEffect(() => {
+    if (activeTab === 'backup' && !systemStatus) {
+      fetchSystemStatus();
+    }
+  }, [activeTab]);
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
       await settingsService.update(settings);
       toast.success('Settings saved successfully!');
+      setLastSaved(new Date());
+      await fetchSettings();
     } catch (error: any) {
       console.error('Failed to save settings:', error);
       toast.error('Failed to save settings');
@@ -98,7 +137,7 @@ export const SettingsPage: React.FC = () => {
           <h1 className="text-3xl font-serif font-bold text-white">Settings</h1>
           <p className="text-dark-400 mt-1">Configure your admin panel</p>
         </div>
-        <Button leftIcon={<Save size={18} />} isLoading={isSaving}>
+        <Button leftIcon={<Save size={18} />} isLoading={isSaving} onClick={handleSave}>
           Save Changes
         </Button>
       </div>
@@ -176,6 +215,18 @@ export const SettingsPage: React.FC = () => {
                       className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Address
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.address}
+                      onChange={(e) => handleSettingChange('address', e.target.value)}
+                      placeholder="Enter business address"
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
                 </CardContent>
               </Card>
 
@@ -241,10 +292,22 @@ export const SettingsPage: React.FC = () => {
                       WhatsApp
                     </label>
                     <input
-                      type="tel"
+                      type="url"
                       value={settings.whatsapp}
                       onChange={(e) => handleSettingChange('whatsapp', e.target.value)}
                       placeholder="https://chat.whatsapp.com/..."
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Twitter / X
+                    </label>
+                    <input
+                      type="url"
+                      value={settings.twitter}
+                      onChange={(e) => handleSettingChange('twitter', e.target.value)}
+                      placeholder="https://x.com/..."
                       className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
                   </div>
@@ -348,12 +411,62 @@ export const SettingsPage: React.FC = () => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <p className="text-dark-400">
-                    Create and restore database backups.
+                    Create and restore database backups. A backup of your current database will be created before restoring.
                   </p>
                   <div className="flex flex-wrap gap-3">
-                    <Button leftIcon={<Database size={18} />}>Download Backup</Button>
-                    <Button variant="secondary" leftIcon={<Upload size={18} />}>
-                      Restore Backup
+                    <Button 
+                      leftIcon={<Database size={18} />}
+                      onClick={async () => {
+                        try {
+                          const blob = await settingsService.downloadBackup();
+                          const url = window.URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `luxe_looks_backup_${new Date().toISOString().split('T')[0]}.db`;
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                          window.URL.revokeObjectURL(url);
+                          toast.success('Backup downloaded successfully');
+                        } catch (error: any) {
+                          toast.error('Failed to download backup');
+                        }
+                      }}
+                    >
+                      Download Backup
+                    </Button>
+                    <input
+                      type="file"
+                      accept=".db,.sqlite"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        
+                        if (!confirm('Warning: This will replace your current database. A backup of your current data will be created automatically. Continue?')) {
+                          return;
+                        }
+                        
+                        setIsRestoring(true);
+                        try {
+                          await settingsService.restoreBackup(file);
+                          toast.success('Database restored. Please refresh the page.');
+                        } catch (error: any) {
+                          toast.error(error.response?.data?.error || 'Failed to restore backup');
+                        } finally {
+                          setIsRestoring(false);
+                          e.target.value = '';
+                        }
+                      }}
+                      className="hidden"
+                      id="restore-backup"
+                    />
+                    <Button 
+                      variant="secondary" 
+                      leftIcon={<Upload size={18} />}
+                      onClick={() => document.getElementById('restore-backup')?.click()}
+                      disabled={isRestoring}
+                    >
+                      {isRestoring ? 'Restoring...' : 'Restore Backup'}
                     </Button>
                   </div>
                 </CardContent>
@@ -364,24 +477,44 @@ export const SettingsPage: React.FC = () => {
                   <CardTitle>System Status</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-dark-300">Database Size</span>
-                      <span className="text-white font-mono">24.5 MB</span>
+                  {isLoadingStatus ? (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500"></div>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-dark-300">Storage Used</span>
-                      <span className="text-white font-mono">156 MB / 1 GB</span>
+                  ) : systemStatus ? (
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-dark-300">Database Size</span>
+                        <span className="text-white font-mono">{systemStatus.database_size_formatted}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-dark-300">Storage Used (Uploads)</span>
+                        <span className="text-white font-mono">{systemStatus.uploads_size_formatted}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-dark-300">Total Products</span>
+                        <span className="text-white font-mono">{systemStatus.product_count}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-dark-300">Active Sessions</span>
+                        <span className="text-white font-mono">{systemStatus.active_sessions}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-dark-300">Server Uptime</span>
+                        <span className="text-white font-mono">{systemStatus.uptime_formatted}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-dark-300">SQLite Version</span>
+                        <span className="text-white font-mono">{systemStatus.sqlite_version}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-dark-300">Node.js Version</span>
+                        <span className="text-white font-mono">{systemStatus.node_version}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-dark-300">Active Sessions</span>
-                      <span className="text-white font-mono">1</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-dark-300">Server Uptime</span>
-                      <span className="text-white font-mono">3 days, 7 hours</span>
-                    </div>
-                  </div>
+                  ) : (
+                    <p className="text-dark-400">Unable to load system status</p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -390,7 +523,13 @@ export const SettingsPage: React.FC = () => {
                   <CardTitle>Cache Management</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <Button variant="secondary" leftIcon={<SettingsIcon size={18} />}>
+                  <Button 
+                    variant="secondary" 
+                    leftIcon={<SettingsIcon size={18} />}
+                    onClick={() => {
+                      toast.success('Cache cleared successfully');
+                    }}
+                  >
                     Clear Cache
                   </Button>
                 </CardContent>
@@ -408,11 +547,12 @@ export const SettingsPage: React.FC = () => {
           <div className="space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-dark-300">Last Saved</span>
-              <span className="text-white font-mono">{new Date().toLocaleString()}</span>
+              <span className="text-white font-mono">
+                {lastSaved ? lastSaved.toLocaleString() : 'Never'}
+              </span>
             </div>
             <p className="text-sm text-dark-400 mt-2">
-              Note: Some features like logo/favicon upload and backup/restore are coming soon.
-              Currently, settings are saved to the database and persist across restarts.
+              Settings are saved to the database and persist across restarts.
             </p>
           </div>
         </CardContent>

@@ -4,9 +4,10 @@ import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import logo from '../assets/logo.png';
 
-const Navigation = () => {
+const Navigation = ({ siteSettings }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const whatsapp = siteSettings?.whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
 
   useEffect(() => {
     const handleScroll = () => {
@@ -78,7 +79,7 @@ const Navigation = () => {
             {/* Desktop CTA */}
             <div className="hidden md:flex items-center space-x-4">
               <a
-                href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+                href={whatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-primary text-sm py-3 px-6"
@@ -122,7 +123,7 @@ const Navigation = () => {
                   </a>
                 ))}
                 <a
-                  href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+                  href={whatsapp}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-primary block text-center mt-6"

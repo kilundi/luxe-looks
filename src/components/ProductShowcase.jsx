@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MessageCircle, Star } from 'lucide-react';
 
-const ProductShowcase = () => {
+const ProductShowcase = ({ siteSettings }) => {
+  const { whatsapp = '' } = siteSettings || {};
+  const waLink = whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -219,7 +221,7 @@ const ProductShowcase = () => {
 
                 {/* CTA */}
                 <a
-                  href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+                  href={waLink}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 w-full bg-primary hover:bg-yellow-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 shadow-md hover:shadow-lg"
@@ -243,7 +245,7 @@ const ProductShowcase = () => {
             Want to see more products? Browse our full catalog on WhatsApp!
           </p>
           <a
-            href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+            href={waLink}
             target="_blank"
             rel="noopener noreferrer"
             className="btn-secondary inline-flex items-center gap-3"

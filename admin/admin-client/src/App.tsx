@@ -22,6 +22,7 @@ import { CategoriesPage } from '@/components/pages/CategoriesPage';
 import { MediaPage } from '@/components/pages/MediaPage';
 import { SettingsPage } from '@/components/pages/SettingsPage';
 import { SessionsPage } from '@/components/pages/SessionsPage';
+import { ActivityLogPage } from '@/components/pages/ActivityLogPage';
 
 // Login Page Component
 const LoginPage = () => {
@@ -725,6 +726,23 @@ const ProductsPage = () => {
   );
 };
 
+// Logout handler component
+const LogoutPage = () => {
+  const { logout } = useAuthStore();
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    logout();
+    navigate('/admin/login', { replace: true });
+  }, [logout, navigate]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-dark-900">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+    </div>
+  );
+};
+
 // Main App Component
 const App = () => {
   return (
@@ -732,6 +750,7 @@ const App = () => {
       <Routes>
         {/* Public routes */}
         <Route path="/admin/login" element={<LoginPage />} />
+        <Route path="/admin/logout" element={<LogoutPage />} />
 
         {/* Protected routes */}
         <Route
@@ -749,6 +768,7 @@ const App = () => {
           <Route path="media" element={<MediaPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="sessions" element={<SessionsPage />} />
+          <Route path="activity-logs" element={<ActivityLogPage />} />
         </Route>
 
         {/* Catch all - redirect to admin */}

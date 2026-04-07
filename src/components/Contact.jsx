@@ -1,12 +1,22 @@
 import { motion } from 'framer-motion';
 import { Phone, Mail, MessageCircle, MapPin, Heart, Video, Clock, ArrowUp } from 'lucide-react';
 
-const Contact = () => {
+const Contact = ({ siteSettings }) => {
+  const {
+    phone_number = '',
+    contact_email = '',
+    address = '',
+    whatsapp = 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+    facebook = '',
+    instagram = '',
+    twitter = '',
+  } = siteSettings || {};
+
   const socialLinks = [
     {
       name: 'Instagram',
       icon: Heart,
-      url: 'https://www.instagram.com/luxe_looks15',
+      url: instagram || 'https://www.instagram.com/luxe_looks15',
       color: 'from-purple-600 to-pink-600',
     },
     {
@@ -18,7 +28,7 @@ const Contact = () => {
     {
       name: 'WhatsApp',
       icon: MessageCircle,
-      url: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      url: whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
       color: 'from-green-500 to-green-600',
     },
   ];
@@ -87,10 +97,10 @@ const Contact = () => {
                   <div>
                     <p className="font-semibold text-secondary">Phone</p>
                     <a
-                      href="tel:0701974458"
+                      href={`tel:${phone_number.replace(/\D/g, '')}`}
                       className="text-gray-600 hover:text-primary transition-colors font-medium text-lg"
                     >
-                      0701974458
+                      {phone_number || '0701974458'}
                     </a>
                     <p className="text-sm text-gray-500">Mon-Sat, 8am - 6pm</p>
                   </div>
@@ -103,10 +113,10 @@ const Contact = () => {
                   <div>
                     <p className="font-semibold text-secondary">Email</p>
                     <a
-                      href="mailto:luxe.looksbeautyandcosmeticske@gmail.com"
+                      href={`mailto:${contact_email}`}
                       className="text-gray-600 hover:text-primary transition-colors font-medium"
                     >
-                      luxe.looksbeautyandcosmeticske@gmail.com
+                      {contact_email || 'luxe.looksbeautyandcosmeticske@gmail.com'}
                     </a>
                   </div>
                 </div>
@@ -117,7 +127,7 @@ const Contact = () => {
                   </div>
                   <div>
                     <p className="font-semibold text-secondary">Location</p>
-                    <p className="text-gray-600">Nairobi, Kenya</p>
+                    <p className="text-gray-600">{address || 'Nairobi, Kenya'}</p>
                     <p className="text-sm text-gray-500">Online store with delivery countrywide</p>
                   </div>
                 </div>
@@ -296,7 +306,7 @@ const Contact = () => {
                 Join our WhatsApp community for exclusive deals, beauty tips, and direct access to our team.
               </p>
               <a
-                href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+                href={whatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-white text-primary font-bold py-4 px-8 rounded-full inline-block shadow-lg hover:shadow-xl transition-all duration-300"

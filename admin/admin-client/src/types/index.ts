@@ -87,3 +87,27 @@ export interface CategoryOrder {
   id: number;
   sort_order: number;
 }
+
+export interface ActivityLog {
+  id: number;
+  user_id: number | null;
+  username: string | null;
+  action: 'create' | 'update' | 'delete' | 'upload';
+  entity_type: string | null;
+  entity_id: number | null;
+  old_value: Record<string, any> | null;
+  new_value: Record<string, any> | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export interface ActivityLogFilters {
+  user_id?: number;
+  action?: string;
+  entity_type?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  limit?: number;
+}

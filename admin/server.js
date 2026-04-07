@@ -203,6 +203,33 @@ const upload = multer({
   }
 });
 
+// Activity logging helper
+function logActivity(req, action, entity_type, entity_id, old_value, new_value) {
+  const user_id = req.user ? req.user.id : null;
+  const ip_address = req.ip || req.connection.remoteAddress || null;
+  const user_agent = req.headers['user-agent'] || null;
+
+  db.run(
+    `INSERT INTO activity_logs (user_id, action, entity_type, entity_id, old_value, new_value, ip_address, user_agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      user_id,
+      action,
+      entity_type,
+      entity_id,
+      old_value ? JSON.stringify(old_value) : null,
+      new_value ? JSON.stringify(new_value) : null,
+      ip_address,
+      user_agent
+    ],
+    (err) => {
+      if (err) {
+        console.error('Activity log error:', err.message);
+      }
+    }
+  );
+}
+
 // Auth middleware
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -698,16 +725,18 @@ app.post('/api/products', authenticateTokenWithSession, upload.single('image'), 
         updated_at: new Date().toISOString()
       };
 
-      // Broadcast event
-      if (req.app.locals.clients) {
-        const message = `event: product_created\ndata: ${JSON.stringify(newProduct)}\n\n`;
-        req.app.locals.clients.forEach(client => {
-          try { client.write(message); } catch (e) {}
-        });
-      }
+        // Broadcast event
+        if (req.app.locals.clients) {
+          const message = `event: product_created\ndata: ${JSON.stringify(newProduct)}\n\n`;
+          req.app.locals.clients.forEach(client => {
+            try { client.write(message); } catch (e) {}
+          });
+        }
 
-      res.json(newProduct);
-    }
+        logActivity(req, 'create', 'product', newProduct.id, null, newProduct);
+
+        res.json(newProduct);
+      }
   );
 });
 
@@ -766,6 +795,8 @@ app.put('/api/products/:id', authenticateTokenWithSession, upload.single('image'
           });
         }
 
+        logActivity(req, 'update', 'product', parseInt(productId), product, updatedProduct);
+
         res.json(updatedProduct);
       }
     );
@@ -803,6 +834,8 @@ app.delete('/api/products/:id', authenticateTokenWithSession, (req, res) => {
         });
       }
 
+      logActivity(req, 'delete', 'product', parseInt(productId), product, null);
+
       res.json({ message: 'Product deleted successfully' });
     });
   });
@@ -837,9 +870,13 @@ app.post('/api/products/bulk-delete', authenticateTokenWithSession, (req, res) =
       if (err) {
         return res.status(500).json({ error: err.message });
       }
+
+      const deletedCount = this.affectedRows;
+      products.forEach(p => logActivity(req, 'delete', 'product', p.id, p, null));
+
       res.json({
-        message: `${this.affectedRows} product(s) deleted successfully`,
-        deletedCount: this.affectedRows
+        message: `${deletedCount} product(s) deleted successfully`,
+        deletedCount
       });
     });
   });
@@ -880,17 +917,37 @@ app.post('/api/products/bulk-update', authenticateTokenWithSession, (req, res) =
     return res.status(400).json({ error: 'No valid fields to update' });
   }
 
-  setClause.push('updated_at = CURRENT_TIMESTAMP');
-  values.push(...ids);
-
-  const sql = `UPDATE products SET ${setClause.join(', ')} WHERE id IN (${ids.map(() => '?').join(',')})`;
-  db.run(sql, values, function (err) {
+  // Fetch old products for logging
+  db.all('SELECT * FROM products WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids, (err, oldProducts) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json({
-      message: `${this.affectedRows} product(s) updated successfully`,
-      updatedCount: this.affectedRows
+
+    setClause.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(...ids);
+
+    const sql = `UPDATE products SET ${setClause.join(', ')} WHERE id IN (${ids.map(() => '?').join(',')})`;
+    db.run(sql, values, function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+
+      // Fetch updated products and log
+      db.all('SELECT * FROM products WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids, (err, updatedProducts) => {
+        if (!err && updatedProducts) {
+          oldProducts.forEach(old => {
+            const updated = updatedProducts.find(p => p.id === old.id);
+            if (updated) {
+              logActivity(req, 'update', 'product', old.id, old, updated);
+            }
+          });
+        }
+      });
+
+      res.json({
+        message: `${this.affectedRows} product(s) updated successfully`,
+        updatedCount: this.affectedRows
+      });
     });
   });
 });
@@ -964,6 +1021,14 @@ app.post('/api/products/bulk-price-adjust', authenticateTokenWithSession, (req, 
         return res.status(500).json({ error: 'One or more updates failed' });
       } else {
         db.run('COMMIT');
+
+        products.forEach(oldProduct => {
+          const updated = updates.find(u => u.id === oldProduct.id);
+          if (updated) {
+            logActivity(req, 'update', 'product', oldProduct.id, oldProduct, updated);
+          }
+        });
+
         res.json({
           message: `${updates.length} product(s) price adjusted successfully`,
           adjustedCount: updates.length
@@ -993,7 +1058,7 @@ app.post('/api/products/:id/duplicate', authenticateTokenWithSession, (req, res)
         if (err) {
           return res.status(500).json({ error: err.message });
         }
-        res.json({
+        const newProduct = {
           id: this.lastID,
           name: newName,
           category: product.category,
@@ -1008,7 +1073,9 @@ app.post('/api/products/:id/duplicate', authenticateTokenWithSession, (req, res)
           meta_description: product.meta_description || null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
-        });
+        };
+        logActivity(req, 'create', 'product', newProduct.id, null, newProduct);
+        res.json(newProduct);
       }
     );
   });
@@ -1306,18 +1373,20 @@ app.post('/api/categories', authenticateTokenWithSession, (req, res) => {
         }
         return res.status(500).json({ error: err.message });
       }
-      res.json({
+      const newCategory = {
         id: this.lastID,
         name,
         slug,
-        description,
-        icon,
+        description: description || null,
+        icon: icon || null,
         color: color || '#D4AF37',
         sort_order: sort_order || 0,
         is_active: is_active !== undefined ? is_active : 1,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      });
+      };
+      logActivity(req, 'create', 'category', newCategory.id, null, newCategory);
+      res.json(newCategory);
     }
   );
 });
@@ -1353,8 +1422,8 @@ app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
           }
           return res.status(500).json({ error: err.message });
         }
-        res.json({
-          id: categoryId,
+        const updatedCategory = {
+          id: parseInt(categoryId),
           name: name || category.name,
           slug: slug || category.slug,
           description: description !== undefined ? description : category.description,
@@ -1364,7 +1433,9 @@ app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
           is_active: is_active !== undefined ? is_active : category.is_active,
           created_at: category.created_at,
           updated_at: new Date().toISOString()
-        });
+        };
+        logActivity(req, 'update', 'category', parseInt(categoryId), category, updatedCategory);
+        res.json(updatedCategory);
       }
     );
   });
@@ -1374,20 +1445,31 @@ app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
 app.delete('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
   const categoryId = req.params.id;
 
-  // Check if category has products
-  db.get('SELECT COUNT(*) as count FROM products WHERE category = (SELECT name FROM categories WHERE id = ?)', [categoryId], (err, row) => {
+  // Get category data before deleting for logging
+  db.get('SELECT * FROM categories WHERE id = ?', [categoryId], (err, category) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    if (row && row.count > 0) {
-      return res.status(400).json({ error: `Cannot delete category with ${row.count} product(s). Reassign products first.` });
+    if (!category) {
+      return res.status(404).json({ error: 'Category not found' });
     }
 
-    db.run('DELETE FROM categories WHERE id = ?', [categoryId], function (err) {
+    // Check if category has products
+    db.get('SELECT COUNT(*) as count FROM products WHERE category = ?', [category.name], (err, row) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
-      res.json({ message: 'Category deleted successfully' });
+      if (row && row.count > 0) {
+        return res.status(400).json({ error: `Cannot delete category with ${row.count} product(s). Reassign products first.` });
+      }
+
+      db.run('DELETE FROM categories WHERE id = ?', [categoryId], function (err) {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+        logActivity(req, 'delete', 'category', parseInt(categoryId), category, null);
+        res.json({ message: 'Category deleted successfully' });
+      });
     });
   });
 });
@@ -1427,7 +1509,22 @@ app.post('/api/categories/reorder', authenticateTokenWithSession, (req, res) => 
 
 // ==================== SETTINGS API ====================
 
-// Get all settings as key-value object
+// Public endpoint - Get all settings (no auth required for public frontend)
+app.get('/api/site', (req, res) => {
+  db.all('SELECT key, value FROM settings', [], (err, rows) => {
+    if (err) {
+      console.error('Error fetching settings:', err.message);
+      return res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+    const settings = {};
+    rows.forEach(row => {
+      settings[row.key] = row.value;
+    });
+    res.json(settings);
+  });
+});
+
+// Get all settings as key-value object (admin only)
 app.get('/api/settings', authenticateTokenWithSession, (req, res) => {
   db.all('SELECT key, value FROM settings', [], (err, rows) => {
     if (err) {
@@ -1450,35 +1547,361 @@ app.put('/api/settings', authenticateTokenWithSession, (req, res) => {
     return res.status(400).json({ error: 'Settings object is required' });
   }
 
-  db.serialize(() => {
-    let completed = 0;
-    const errors = [];
-    const keys = Object.keys(updates);
-
-    if (keys.length === 0) {
-      return res.status(400).json({ error: 'No settings to update' });
+  // Get old settings for logging
+  db.all('SELECT key, value FROM settings', [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
     }
 
-    keys.forEach(key => {
-      const value = String(updates[key]);
-      db.run(
-        'INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-        [key, value],
-        function (err) {
-          if (err) {
-            errors.push(`${key}: ${err.message}`);
-          }
-          completed++;
-          if (completed === keys.length) {
-            if (errors.length > 0) {
-              return res.status(500).json({ error: errors.join(', ') });
+    const oldSettings = {};
+    rows.forEach(row => {
+      oldSettings[row.key] = row.value;
+    });
+
+    db.serialize(() => {
+      let completed = 0;
+      const errors = [];
+      const keys = Object.keys(updates);
+
+      if (keys.length === 0) {
+        return res.status(400).json({ error: 'No settings to update' });
+      }
+
+      keys.forEach(key => {
+        const value = String(updates[key]);
+        db.run(
+          'INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+          [key, value],
+          function (err) {
+            if (err) {
+              errors.push(`${key}: ${err.message}`);
             }
-            res.json({ message: 'Settings updated successfully' });
+            completed++;
+            if (completed === keys.length) {
+              if (errors.length > 0) {
+                return res.status(500).json({ error: errors.join(', ') });
+              }
+
+              // Log each changed setting
+              keys.forEach(key => {
+                if (oldSettings[key] !== updates[key]) {
+                  logActivity(req, 'update', 'setting', null, { [key]: oldSettings[key] }, { [key]: updates[key] });
+                }
+              });
+
+              res.json({ message: 'Settings updated successfully' });
+            }
           }
-        }
-      );
+        );
+      });
     });
   });
+});
+
+// ==================== SETTINGS API - SYSTEM ====================
+
+// Get system status info
+app.get('/api/settings/system-status', authenticateTokenWithSession, (req, res) => {
+  const dbPath = path.join(__dirname, 'luxe_looks.db');
+  const uploadsDir = path.join(__dirname, 'uploads');
+  
+  // Get database file size
+  let dbSize = 0;
+  try {
+    if (fs.existsSync(dbPath)) {
+      const stats = fs.statSync(dbPath);
+      dbSize = stats.size;
+    }
+  } catch (e) {
+    console.error('Error getting db size:', e);
+  }
+
+  // Get uploads folder size
+  let uploadsSize = 0;
+  try {
+    if (fs.existsSync(uploadsDir)) {
+      const files = fs.readdirSync(uploadsDir);
+      files.forEach(file => {
+        const filePath = path.join(uploadsDir, file);
+        const stats = fs.statSync(filePath);
+        uploadsSize += stats.size;
+      });
+    }
+  } catch (e) {
+    console.error('Error getting uploads size:', e);
+  }
+
+  // Get active session count
+  db.get(
+    'SELECT COUNT(*) as count FROM sessions WHERE expires_at > datetime("now")',
+    [],
+    (err, sessionResult) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+
+      // Get server start time (approximate)
+      const uptime = process.uptime();
+      const uptimeDays = Math.floor(uptime / 86400);
+      const uptimeHours = Math.floor((uptime % 86400) / 3600);
+      const uptimeMinutes = Math.floor((uptime % 3600) / 60);
+
+      // Get SQLite version
+      db.get('SELECT sqlite_version() as version', [], (err, versionResult) => {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+
+        // Get product count
+        db.get('SELECT COUNT(*) as count FROM products', [], (err, productResult) => {
+          if (err) {
+            return res.status(500).json({ error: err.message });
+          }
+
+          res.json({
+            database_size: dbSize,
+            database_size_formatted: formatBytes(dbSize),
+            uploads_size: uploadsSize,
+            uploads_size_formatted: formatBytes(uploadsSize),
+            active_sessions: sessionResult.count,
+            uptime_seconds: Math.floor(uptime),
+            uptime_formatted: `${uptimeDays}d ${uptimeHours}h ${uptimeMinutes}m`,
+            sqlite_version: versionResult.version,
+            node_version: process.version,
+            product_count: productResult.count
+          });
+        });
+      });
+    }
+  );
+});
+
+// Download database backup
+app.get('/api/settings/backup', authenticateTokenWithSession, (req, res) => {
+  const dbPath = path.join(__dirname, 'luxe_looks.db');
+  
+  if (!fs.existsSync(dbPath)) {
+    return res.status(404).json({ error: 'Database file not found' });
+  }
+
+  const backupFileName = `luxe_looks_backup_${new Date().toISOString().split('T')[0]}.db`;
+  res.download(dbPath, backupFileName, (err) => {
+    if (err) {
+      console.error('Backup download error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to download backup' });
+      }
+    }
+  });
+});
+
+// Restore database from backup
+app.post('/api/settings/restore', authenticateTokenWithSession, uploadCSV.single('backup'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No backup file uploaded' });
+  }
+
+  const dbPath = path.join(__dirname, 'luxe_looks.db');
+  const backupPath = path.join(__dirname, 'luxe_looks.db.backup');
+  
+  try {
+    // Create backup of current database first
+    if (fs.existsSync(dbPath)) {
+      // Remove old backup if exists
+      if (fs.existsSync(backupPath)) {
+        fs.unlinkSync(backupPath);
+      }
+      fs.copyFileSync(dbPath, backupPath);
+    }
+
+    // Write the uploaded file to database path
+    fs.writeFileSync(dbPath, req.file.buffer);
+
+    logActivity(req, 'restore', 'database', null, null, { timestamp: new Date().toISOString() });
+
+    res.json({ message: 'Database restored successfully. Please restart the server.' });
+  } catch (error) {
+    console.error('Restore error:', error);
+    
+    // Try to restore from backup
+    try {
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, dbPath);
+      }
+    } catch (e) {
+      console.error('Failed to restore backup:', e);
+    }
+
+    res.status(500).json({ error: 'Failed to restore database: ' + error.message });
+  }
+});
+
+// ==================== ACTIVITY LOGS API ====================
+
+// Get activity logs with filtering and pagination
+app.get('/api/activity-logs', authenticateTokenWithSession, (req, res) => {
+  const {
+    user_id,
+    action,
+    entity_type,
+    dateFrom,
+    dateTo,
+    page = 1,
+    limit = 50
+  } = req.query;
+
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const limitInt = parseInt(limit);
+
+  const conditions = [];
+  const params = [];
+
+  if (user_id) {
+    conditions.push('al.user_id = ?');
+    params.push(parseInt(user_id));
+  }
+  if (action) {
+    conditions.push('al.action = ?');
+    params.push(action);
+  }
+  if (entity_type) {
+    conditions.push('al.entity_type = ?');
+    params.push(entity_type);
+  }
+  if (dateFrom) {
+    conditions.push('al.created_at >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('al.created_at <= ?');
+    params.push(dateTo);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // Get total count
+  const countQuery = `SELECT COUNT(*) as total FROM activity_logs al ${whereClause}`;
+  db.get(countQuery, params, (err, countResult) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    const total = countResult.total;
+
+    // Get paginated logs with user info
+    const dataQuery = `
+      SELECT
+        al.*,
+        u.username
+      FROM activity_logs al
+      LEFT JOIN users u ON al.user_id = u.id
+      ${whereClause}
+      ORDER BY al.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    params.push(limitInt, offset);
+
+    db.all(dataQuery, params, (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+
+      const logs = rows.map(row => ({
+        ...row,
+        old_value: row.old_value ? JSON.parse(row.old_value) : null,
+        new_value: row.new_value ? JSON.parse(row.new_value) : null
+      }));
+
+      res.json({
+        items: logs,
+        total,
+        page: parseInt(page),
+        limit: limitInt,
+        totalPages: Math.ceil(total / limitInt)
+      });
+    });
+  });
+});
+
+// Export activity logs to CSV
+app.get('/api/activity-logs/export', authenticateTokenWithSession, (req, res) => {
+  const { dateFrom, dateTo } = req.query;
+
+  const conditions = [];
+  const params = [];
+
+  if (dateFrom) {
+    conditions.push('al.created_at >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push('al.created_at <= ?');
+    params.push(dateTo);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const query = `
+    SELECT
+      al.id,
+      u.username,
+      al.action,
+      al.entity_type,
+      al.entity_id,
+      al.ip_address,
+      al.created_at
+    FROM activity_logs al
+    LEFT JOIN users u ON al.user_id = u.id
+    ${whereClause}
+    ORDER BY al.created_at DESC
+  `;
+
+  db.all(query, params, (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    const headers = ['ID', 'User', 'Action', 'Entity Type', 'Entity ID', 'IP Address', 'Date'];
+    const csvRows = [];
+    csvRows.push(headers.join(','));
+
+    rows.forEach(log => {
+      const values = [
+        log.id,
+        `"${(log.username || 'System').replace(/"/g, '""')}"`,
+        log.action,
+        log.entity_type,
+        log.entity_id || '',
+        log.ip_address || '',
+        log.created_at
+      ];
+      csvRows.push(values.join(','));
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="activity-logs-${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(csvRows.join('\n'));
+  });
+});
+
+// Cleanup old activity logs
+app.delete('/api/activity-logs/cleanup', authenticateTokenWithSession, (req, res) => {
+  const { days = 90 } = req.body;
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - parseInt(days));
+
+  db.run(
+    'DELETE FROM activity_logs WHERE created_at < ?',
+    [cutoffDate.toISOString()],
+    function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({
+        message: `Deleted ${this.changes} old log entries`,
+        deletedCount: this.changes
+      });
+    }
+  );
 });
 
 // ==================== MEDIA API ====================
@@ -1537,9 +1960,9 @@ app.get('/api/media', authenticateTokenWithSession, async (req, res) => {
 app.delete('/api/media/:filename', authenticateTokenWithSession, (req, res) => {
   const filename = req.params.filename;
   const filePath = path.join(__dirname, 'uploads', filename);
+  const imagePath = `/uploads/${filename}`;
 
   // Check if file is used by any product
-  const imagePath = `/uploads/${filename}`;
   db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
     if (err) {
       return res.status(500).json({ error: err.message });
@@ -1555,6 +1978,7 @@ app.delete('/api/media/:filename', authenticateTokenWithSession, (req, res) => {
         }
         return res.status(500).json({ error: err.message });
       }
+      logActivity(req, 'delete', 'media', null, { filename, path: imagePath }, null);
       res.json({ message: 'Media deleted successfully' });
     });
   });
@@ -1593,6 +2017,11 @@ app.post('/api/media/upload', authenticateTokenWithSession, (req, res) => {
       uploaded_at: new Date().toISOString(),
       product_count: 0
     }));
+
+    // Log each uploaded file
+    uploadedFiles.forEach(file => {
+      logActivity(req, 'upload', 'media', null, null, { filename: file.filename, path: file.path, size: file.size });
+    });
 
     res.json({
       message: `${uploadedFiles.length} file(s) uploaded successfully`,

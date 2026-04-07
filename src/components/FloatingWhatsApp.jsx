@@ -1,11 +1,29 @@
-import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
 
-const FloatingWhatsApp = () => {
-  const whatsappNumber = '254701974458'; // Kenyan number without + or leading zeros
+const FloatingWhatsApp = ({ siteSettings }) => {
+  const defaultUrl = 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
   const message = encodeURIComponent('Hello! I would like to inquire about your products.');
-
-  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${message}`;
+  
+  const [whatsappUrl, setWhatsappUrl] = useState(defaultUrl);
+  
+  useEffect(() => {
+    try {
+      const whatsapp = siteSettings?.whatsapp;
+      if (whatsapp && typeof whatsapp === 'string' && whatsapp.trim()) {
+        const trimmed = whatsapp.trim();
+        if (trimmed.startsWith('https://chat.whatsapp.com/')) {
+          setWhatsappUrl(trimmed);
+        } else if (trimmed.startsWith('https://wa.me/')) {
+          setWhatsappUrl(trimmed + '?text=' + message);
+        } else if (trimmed.match(/^\d{10,}$/)) {
+          setWhatsappUrl(`https://wa.me/${trimmed}?text=${message}`);
+        }
+      }
+    } catch (e) {
+      console.error('FloatingWhatsApp error:', e);
+    }
+  }, [siteSettings, message]);
 
   return (
     <motion.a

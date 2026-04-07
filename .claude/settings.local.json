@@ -42,7 +42,17 @@
       "Bash(findstr :5173)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(rm:*)",
+      "Bash(ls:*)",
+      "Bash(rm -f index.html)",
+      "Bash(rm -rf assets)",
+      "Bash(sqlite3 luxe_looks.db \"SELECT COUNT\\(*\\) as count FROM products WHERE status = 'published';\")",
+      "Bash(sqlite3:*)",
+      "Bash(findstr node:*)",
+      "Bash(git status:*)",
+      "Bash(git rm:*)",
+      "Bash(grep -E \"\\(^\\\\.env$|\\\\.env$\\)\" .gitignore admin/.gitignore)"
     ]
   }
 }

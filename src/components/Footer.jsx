@@ -2,8 +2,9 @@ import { Heart, Camera, Video, MessageCircle } from 'lucide-react';
 import logo from '../assets/logo.png';
 import PaymentMethods from './PaymentMethods';
 
-const Footer = () => {
+const Footer = ({ siteSettings }) => {
   const currentYear = new Date().getFullYear();
+  const { phone_number = '', contact_email = '', whatsapp = 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK', site_name = 'Luxe Looks' } = siteSettings || {};
 
   const quickLinks = [
     { name: 'Home', href: '#home' },
@@ -36,7 +37,7 @@ const Footer = () => {
     {
       name: 'WhatsApp',
       icon: MessageCircle,
-      url: 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
+      url: whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK',
     },
   ];
 
@@ -123,7 +124,7 @@ const Footer = () => {
               Join our WhatsApp community for exclusive deals and updates.
             </p>
             <a
-              href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+              href={whatsapp}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-primary w-full flex items-center justify-center gap-3"

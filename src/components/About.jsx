@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
 import { Truck, Shield, Clock, Award, MapPin } from 'lucide-react';
 
-const About = () => {
+const About = ({ siteSettings }) => {
+  const whatsapp = siteSettings?.whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
   const features = [
     {
       icon: Truck,
@@ -107,7 +108,7 @@ const About = () => {
 
             <div className="mt-12">
               <a
-                href="https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK"
+                href={whatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-primary inline-flex items-center gap-3"

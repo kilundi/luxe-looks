@@ -1,4 +1,5 @@
 import { Helmet, HelmetProvider } from 'react-helmet-async';
+import { useState, useEffect } from 'react';
 import SkipToContent from './components/SkipToContent';
 import PageLoader from './components/PageLoader';
 import Navigation from './components/Navigation';
@@ -14,7 +15,31 @@ import BackToTop from './components/BackToTop';
 import ScrollProgress from './components/ScrollProgress';
 import './index.css';
 
+const API_URL = 'http://localhost:3001/api';
+
 function App() {
+  const [siteSettings, setSiteSettings] = useState({
+    site_name: 'Luxe Looks',
+    phone_number: '',
+    contact_email: '',
+    address: '',
+    whatsapp: '',
+    facebook: '',
+    instagram: '',
+    twitter: '',
+  });
+
+  useEffect(() => {
+    fetch(`${API_URL}/site`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && Object.keys(data).length > 0) {
+          setSiteSettings(prev => ({ ...prev, ...data }));
+        }
+      })
+      .catch(console.error);
+  }, []);
+
   return (
     <HelmetProvider>
       <div className="min-h-screen">
@@ -47,17 +72,17 @@ function App() {
 
         <SkipToContent />
         <ScrollProgress />
-        <Navigation />
+        <Navigation siteSettings={siteSettings} />
         <main id="main-content">
-          <Hero />
-          <ProductCategories />
-          <ProductShowcase />
-          <About />
+          <Hero siteSettings={siteSettings} />
+          <ProductCategories siteSettings={siteSettings} />
+          <ProductShowcase siteSettings={siteSettings} />
+          <About siteSettings={siteSettings} />
           <Reviews />
-          <Contact />
+          <Contact siteSettings={siteSettings} />
         </main>
-        <Footer />
-        <FloatingWhatsApp />
+        <Footer siteSettings={siteSettings} />
+        <FloatingWhatsApp siteSettings={siteSettings} />
         <BackToTop />
       </div>
     </HelmetProvider>

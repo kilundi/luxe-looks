@@ -25,6 +25,8 @@ db.serialize(() => {
         { key: 'site_name', value: 'Luxe Looks' },
         { key: 'contact_email', value: 'hello@luxelooks.co.ke' },
         { key: 'phone_number', value: '+254 700 000 000' },
+        { key: 'address', value: '' },
+        { key: 'twitter', value: '' },
         { key: 'logo', value: '' },
         { key: 'favicon', value: '' },
         { key: 'facebook', value: '' },
