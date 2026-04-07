@@ -1,5 +1,12 @@
+require('dotenv').config({ path: __dirname + '/.env' });
+
+console.log('AWS Endpoint:', process.env.AWS_S3_ENDPOINT_URL);
+console.log('S3 Bucket:', process.env.BUCKET_NAME);
+
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const sqlite3 = require('sqlite3').verbose();
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
@@ -7,6 +14,9 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
+
+// Load S3 config AFTER dotenv
+const { upload, isS3Configured, isSupabase, getImagePath, bucketName } = require('./s3Config');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -18,7 +28,7 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
   process.exit(1);
 }
 
-// Multer configuration for CSV import (store in memory)
+// Multer configuration for CSV import (store in memory) - not affected by S3
 const uploadCSV = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
@@ -51,14 +61,18 @@ function validatePasswordStrength(password) {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-// Serve admin panel built files from /admin (handled by catch-all route below)
-// Static assets under /admin are served from the dist folder
+
+// Serve admin assets (JS/CSS)
 app.use('/admin/assets', express.static(path.join(__dirname, 'dist/assets')));
 
-// Ensure uploads directory exists
-if (!fs.existsSync('./uploads')) {
-  fs.mkdirSync('./uploads', { recursive: true });
+// Serve uploads folder only if not using S3
+if (!isS3Configured()) {
+  app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+  
+  // Ensure uploads directory exists
+  if (!fs.existsSync('./uploads')) {
+    fs.mkdirSync('./uploads', { recursive: true });
+  }
 }
 
 // Database setup
@@ -88,6 +102,15 @@ db.serialize(() => {
     status TEXT DEFAULT 'published',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Media table for tracking uploaded images
+  db.run(`CREATE TABLE IF NOT EXISTS media (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    path TEXT NOT NULL,
+    size INTEGER DEFAULT 0,
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
   // Categories table
@@ -178,53 +201,6 @@ db.serialize(() => {
       stmt.finalize();
       console.log('Backfill: Completed');
     });
-  }
-});
-
-// Image upload configuration
-const storage = multer.diskStorage({
-  destination: './uploads/',
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-// Logo/Favicon upload config
-const logoStorage = multer.diskStorage({
-  destination: './uploads/',
-  filename: (req, file, cb) => {
-    const fieldname = file.fieldname === 'favicon' ? 'favicon' : 'logo';
-    const ext = path.extname(file.originalname);
-    cb(null, fieldname + ext);
-  }
-});
-
-const uploadLogo = multer({
-  storage: logoStorage,
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp|ico/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (mimetype && extname) {
-      return cb(null, true);
-    }
-    cb(new Error('Only image files are allowed'));
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (mimetype && extname) {
-      return cb(null, true);
-    }
-    cb(new Error('Only image files are allowed'));
   }
 });
 
@@ -895,8 +871,16 @@ app.get('/api/products/:id', (req, res) => {
 
 // Create product
 app.post('/api/products', authenticateTokenWithSession, upload.single('image'), (req, res) => {
+  console.log('[POST /api/products] Upload debug:', {
+    hasFile: !!req.file,
+    file: req.file ? { filename: req.file.filename, location: req.file.location, mimetype: req.file.mimetype } : null,
+    bodyKeys: Object.keys(req.body),
+    isS3: isS3Configured(),
+    isSupabase: isSupabase()
+  });
   const { name, category, price, description, rating, reviews, status, existing_image, meta_title, meta_description } = req.body;
-  const image = req.file ? `/uploads/${req.file.filename}` : (existing_image || null);
+  const image = getImagePath(req.file, existing_image);
+  console.log('[POST /api/products] Final image URL:', image);
   const price_value = parsePriceToNumber(price);
 
   db.run(
@@ -945,6 +929,11 @@ app.put('/api/products/:id', authenticateTokenWithSession, upload.single('image'
   console.log(`[PUT /api/products/${req.params.id}] Body:`, {
     name, category, price, description, rating, reviews, status, meta_title, meta_description
   });
+  console.log(`[PUT /api/products/${req.params.id}] Upload debug:`, {
+    hasFile: !!req.file,
+    file: req.file ? { filename: req.file.filename, location: req.file.location } : null,
+    existing_image
+  });
   const productId = req.params.id;
 
   // First get current product to check for existing image
@@ -953,7 +942,7 @@ app.put('/api/products/:id', authenticateTokenWithSession, upload.single('image'
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    const image = req.file ? `/uploads/${req.file.filename}` : (existing_image || product.image);
+    const image = getImagePath(req.file, existing_image || product.image);
     const price_value = parsePriceToNumber(price);
 
     db.run(
@@ -1811,24 +1800,24 @@ app.put('/api/settings', authenticateTokenWithSession, (req, res) => {
 // ==================== SETTINGS API - SYSTEM ====================
 
 // Upload logo or favicon
-app.post('/api/settings/upload-logo', authenticateTokenWithSession, uploadLogo.single('file'), (req, res) => {
+app.post('/api/settings/upload-logo', authenticateTokenWithSession, upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
   
   const type = req.body.type || 'logo';
-  const filePath = `/uploads/${req.file.filename}`;
+  const image = getImagePath(req.file);
   
   // Update settings with the file path
   db.run(
     'INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-    [type, filePath],
+    [type, image],
     function (err) {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
-      logActivity(req, 'update', 'setting', null, null, { [type]: filePath });
-      res.json({ [type]: filePath, message: `${type} uploaded successfully` });
+      logActivity(req, 'update', 'setting', null, null, { [type]: image });
+      res.json({ [type]: image, message: `${type} uploaded successfully` });
     }
   );
 });
@@ -2136,101 +2125,214 @@ app.delete('/api/activity-logs/cleanup', authenticateTokenWithSession, (req, res
 
 // ==================== MEDIA API ====================
 
-// Get all media (images from uploads folder)
+// Get all media (from media table, products, and local uploads)
 app.get('/api/media', authenticateTokenWithSession, async (req, res) => {
-  const uploadsDir = path.join(__dirname, 'uploads');
+  const uniqueImages = new Map();
 
-  fs.readdir(uploadsDir, async (err, files) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-
-    const imageFiles = files.filter(file => {
-      const ext = path.extname(file).toLowerCase();
-      return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+  // 1. Get images from media table (uploaded directly to media library)
+  const mediaFromDb = await new Promise((resolve) => {
+    db.all('SELECT * FROM media ORDER BY uploaded_at DESC', [], (err, rows) => {
+      if (err) {
+        console.error('Error fetching media from DB:', err);
+        resolve([]);
+      } else {
+        resolve(rows || []);
+      }
     });
-
-    // Build media list with product counts in parallel
-    const mediaList = await Promise.all(
-      imageFiles.map(async (filename) => {
-        const filePath = path.join(uploadsDir, filename);
-        const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
-        const size = stats ? stats.size : 0;
-        const uploadDate = stats ? stats.mtime.toISOString() : '';
-        const imagePath = `/uploads/${filename}`;
-
-        // Get product count that uses this image
-        const productCount = await new Promise((resolve) => {
-          db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
-            if (err) {
-              console.error('Error counting products for', filename, err);
-              resolve(0);
-            } else {
-              resolve(row ? row.count : 0);
-            }
-          });
-        });
-
-        return {
-          filename,
-          path: imagePath,
-          size,
-          size_formatted: formatBytes(size),
-          uploaded_at: uploadDate,
-          product_count: productCount
-        };
-      })
-    );
-
-    res.json(mediaList);
   });
+
+  mediaFromDb.forEach(row => {
+    uniqueImages.set(row.path, {
+      id: row.id,
+      filename: row.filename,
+      path: row.path,
+      size: row.size,
+      size_formatted: formatBytes(row.size),
+      uploaded_at: row.uploaded_at,
+      product_count: 0
+    });
+  });
+
+  // 2. Get images from products (that might not be in media table)
+  const mediaFromProducts = await new Promise((resolve) => {
+    db.all("SELECT DISTINCT image, created_at FROM products WHERE image IS NOT NULL AND image != '' ORDER BY created_at DESC", [], (err, rows) => {
+      if (err) {
+        console.error('Error fetching media from products:', err);
+        resolve([]);
+      } else {
+        resolve(rows || []);
+      }
+    });
+  });
+
+  let productImageCounter = 10000;
+  const uniqueProductImages = new Map();
+  mediaFromProducts.forEach(row => {
+    if (row.image && !uniqueProductImages.has(row.image)) {
+      uniqueProductImages.set(row.image, {
+        id: productImageCounter++,
+        filename: row.image.split('/').pop(),
+        path: row.image,
+        size: 0,
+        size_formatted: 'S3',
+        uploaded_at: row.created_at,
+        product_count: 1
+      });
+    }
+  });
+
+  // Merge into uniqueImages (media table images take precedence)
+  uniqueProductImages.forEach((value, key) => {
+    if (!uniqueImages.has(key)) {
+      uniqueImages.set(key, value);
+    }
+  });
+
+  // 3. Get images from local uploads folder (if not using S3)
+  if (!isS3Configured()) {
+    const uploadsDir = path.join(__dirname, 'uploads');
+    if (fs.existsSync(uploadsDir)) {
+      const localFiles = await new Promise((resolve) => {
+        fs.readdir(uploadsDir, (err, files) => {
+          if (err || !files) {
+            resolve([]);
+          } else {
+            resolve(files);
+          }
+        });
+      });
+
+      localFiles.forEach(filename => {
+        const ext = path.extname(filename).toLowerCase();
+        if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+          const filePath = path.join(uploadsDir, filename);
+          const stats = fs.statSync(filePath);
+          const localPath = `/uploads/${filename}`;
+          if (!uniqueImages.has(localPath)) {
+            uniqueImages.set(localPath, {
+              filename,
+              path: localPath,
+              size: stats.size,
+              size_formatted: formatBytes(stats.size),
+              uploaded_at: stats.mtime.toISOString(),
+              product_count: 0
+            });
+          }
+        }
+      });
+    }
+  }
+
+  // Get product counts for each image
+  const finalList = await Promise.all(
+    Array.from(uniqueImages.values()).map(async (media) => {
+      const productCount = await new Promise((resolve) => {
+        db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [media.path], (err, row) => {
+          resolve(row ? row.count : 0);
+        });
+      });
+      return { ...media, product_count: productCount };
+    })
+  );
+
+  res.json(finalList);
 });
 
 // Delete media file
-app.delete('/api/media/:filename', authenticateTokenWithSession, (req, res) => {
-  const filename = req.params.filename;
-  const filePath = path.join(__dirname, 'uploads', filename);
-  const imagePath = `/uploads/${filename}`;
+app.delete('/api/media/:id', authenticateTokenWithSession, (req, res) => {
+  const id = parseInt(req.params.id);
 
-  // Check if file is used by any product
-  db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (row && row.count > 0) {
-      return res.status(400).json({ error: `Cannot delete image used by ${row.count} product(s). Remove from products first.` });
-    }
-
-    fs.unlink(filePath, (err) => {
-      if (err) {
-        if (err.code === 'ENOENT') {
-          return res.status(404).json({ error: 'File not found' });
+  // Check if this is a product image (ID >= 10000)
+  if (id >= 10000) {
+    // Get all distinct product images
+    db.all("SELECT DISTINCT image FROM products WHERE image IS NOT NULL AND image != '' ORDER BY created_at", [], (err, rows) => {
+      if (err || !rows) {
+        return res.status(404).json({ error: 'Media not found' });
+      }
+      
+      // Calculate the index from ID
+      const index = id - 10000;
+      
+      // Build unique images map like in GET
+      const uniqueImages = new Map();
+      rows.forEach(row => {
+        if (row.image) {
+          uniqueImages.set(row.image, true);
         }
+      });
+      
+      const imagesList = Array.from(uniqueImages.keys());
+      
+      if (index < 0 || index >= imagesList.length) {
+        return res.status(404).json({ error: 'Media not found' });
+      }
+      
+      const imagePath = imagesList[index];
+      if (!imagePath) {
+        return res.status(404).json({ error: 'Media not found' });
+      }
+      
+      // Check if other products use this image
+      db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+        if (row && row.count > 0) {
+          return res.status(400).json({ error: `Cannot delete image used by ${row.count} product(s). Remove from products first.` });
+        }
+        
+        // Update the product to remove this image
+        db.run("UPDATE products SET image = NULL WHERE image = ?", [imagePath], (err) => {
+          if (err) {
+            return res.status(500).json({ error: err.message });
+          }
+          res.json({ message: 'Media deleted successfully' });
+        });
+      });
+    });
+    return;
+  }
+
+  // Media from media table
+  db.get('SELECT * FROM media WHERE id = ?', [id], (err, media) => {
+    if (err || !media) {
+      return res.status(404).json({ error: 'Media not found' });
+    }
+
+    // Check if file is used by any product
+    db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [media.path], (err, row) => {
+      if (err) {
         return res.status(500).json({ error: err.message });
       }
-      logActivity(req, 'delete', 'media', null, { filename, path: imagePath }, null);
-      res.json({ message: 'Media deleted successfully' });
+      if (row && row.count > 0) {
+        return res.status(400).json({ error: `Cannot delete image used by ${row.count} product(s). Remove from products first.` });
+      }
+
+      // Delete from media table
+      db.run('DELETE FROM media WHERE id = ?', [id], (err) => {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+
+        if (!media.path.startsWith('http')) {
+          const filePath = path.join(__dirname, 'uploads', media.filename);
+          fs.unlink(filePath, (err) => {
+            if (err && err.code !== 'ENOENT') {
+              console.error('Error deleting local file:', err);
+            }
+          });
+        }
+
+        logActivity(req, 'delete', 'media', null, { filename: media.filename, path: media.path }, null);
+        res.json({ message: 'Media deleted successfully' });
+      });
     });
   });
 });
 
-// Upload media (bulk)
-const uploadMultiple = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (mimetype && extname) {
-      return cb(null, true);
-    }
-    cb(new Error('Only image files are allowed'));
-  }
-}).array('images', 10); // Up to 10 images at once
-
+// Upload media (bulk) - using the shared upload config
 app.post('/api/media/upload', authenticateTokenWithSession, (req, res) => {
-  uploadMultiple(req, res, async (err) => {
+  upload.array('images', 10)(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -2239,14 +2341,48 @@ app.post('/api/media/upload', authenticateTokenWithSession, (req, res) => {
       return res.status(400).json({ error: 'No files uploaded' });
     }
 
-    const uploadedFiles = req.files.map((file) => ({
-      filename: file.filename,
-      path: `/uploads/${file.filename}`,
-      size: file.size,
-      size_formatted: formatBytes(file.size),
-      uploaded_at: new Date().toISOString(),
-      product_count: 0
-    }));
+    // Save to database and return saved records
+    const uploadedFiles = [];
+    
+    for (const file of req.files) {
+      let filePath;
+      if (isS3Configured() && isSupabase() && file.key) {
+        const endpoint = process.env.AWS_S3_ENDPOINT_URL;
+        const projectId = endpoint?.split('.')[0]?.replace('https://', '') || 'mhjxymdsjgtlikmjdiqk';
+        const s3Bucket = process.env.BUCKET_NAME || process.env.AWS_STORAGE_BUCKET_NAME || 'luxe-looks-bucket';
+        filePath = `https://${projectId}.supabase.co/storage/v1/object/public/${s3Bucket}/${file.key}`;
+      } else if (isS3Configured() && file.location) {
+        filePath = file.location;
+      } else {
+        filePath = `/uploads/${file.filename}`;
+      }
+
+      const filename = file.key || file.filename;
+      
+      // Insert into media table
+      await new Promise((resolve) => {
+        db.run(
+          'INSERT INTO media (filename, path, size, uploaded_at) VALUES (?, ?, ?, ?)',
+          [filename, filePath, file.size, new Date().toISOString()],
+          function(err) {
+            if (err) {
+              console.error('Error saving media to database:', err);
+            }
+            resolve();
+          }
+        );
+      });
+
+      uploadedFiles.push({
+        id: 0, // Will be set after insert
+        filename,
+        path: filePath,
+        size: file.size,
+        size_formatted: formatBytes(file.size),
+        uploaded_at: new Date().toISOString(),
+        product_count: 0
+      });
+    }
 
     // Log each uploaded file
     uploadedFiles.forEach(file => {

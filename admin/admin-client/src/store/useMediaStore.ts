@@ -5,10 +5,10 @@ import { mediaService } from '@/services/api';
 interface MediaState {
   media: MediaItem[];
   isLoading: boolean;
-  selectedMedia: Set<string>;
+  selectedMedia: Set<number>;
   fetchMedia: () => Promise<void>;
-  deleteMedia: (filename: string) => Promise<void>;
-  selectMedia: (filename: string, selected: boolean) => void;
+  deleteMedia: (id: number) => Promise<void>;
+  selectMedia: (id: number, selected: boolean) => void;
   clearSelection: () => void;
 }
 
@@ -29,14 +29,14 @@ export const useMediaStore = create<MediaState>((set) => ({
     }
   },
 
-  deleteMedia: async (filename: string) => {
+  deleteMedia: async (id: number) => {
     try {
-      await mediaService.delete(filename);
+      await mediaService.delete(id);
       set((state) => ({
-        media: state.media.filter((m) => m.filename !== filename),
+        media: state.media.filter((m) => m.id !== id),
         selectedMedia: (() => {
           const newSet = new Set(state.selectedMedia);
-          newSet.delete(filename);
+          newSet.delete(id);
           return newSet;
         })(),
       }));
@@ -46,13 +46,13 @@ export const useMediaStore = create<MediaState>((set) => ({
     }
   },
 
-  selectMedia: (filename: string, selected: boolean) => {
+  selectMedia: (id: number, selected: boolean) => {
     set((state) => {
       const newSet = new Set(state.selectedMedia);
       if (selected) {
-        newSet.add(filename);
+        newSet.add(id);
       } else {
-        newSet.delete(filename);
+        newSet.delete(id);
       }
       return { selectedMedia: newSet };
     });

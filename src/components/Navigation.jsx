@@ -4,18 +4,19 @@ import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
 import logo from '../assets/logo.png';
 
+const ASSETS_URL = import.meta.env.VITE_ASSETS_URL || 'http://localhost:3001';
+
 const Navigation = ({ siteSettings }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const whatsapp = siteSettings?.whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
   const siteName = siteSettings?.site_name || 'Luxe Looks';
   const logoUrl = siteSettings?.logo || null;
-  const API_URL = 'http://localhost:3001';
 
   const getLogoSrc = () => {
     if (!logoUrl) return logo;
     if (logoUrl.startsWith('http')) return logoUrl;
-    return `${API_URL}${logoUrl}`;
+    return logoUrl?.startsWith('http') ? logoUrl : logoUrl ? `${ASSETS_URL}${logoUrl}` : logo;
   };
 
   useEffect(() => {

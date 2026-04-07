@@ -37,6 +37,7 @@ export interface Category {
 }
 
 export interface MediaItem {
+  id?: number;
   filename: string;
   path: string;
   size: number;

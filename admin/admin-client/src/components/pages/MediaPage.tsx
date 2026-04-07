@@ -13,7 +13,7 @@ export const MediaPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState<number>(0);
-  const [selectedDetail, setSelectedDetail] = useState<{ filename: string; path: string; size: number; size_formatted: string; uploaded_at: string; product_count: number } | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<{ id?: number; filename: string; path: string; size: number; size_formatted: string; uploaded_at: string; product_count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -72,18 +72,21 @@ export const MediaPage: React.FC = () => {
     if (selectedMedia.size === 0) return;
     if (!window.confirm(`Delete ${selectedMedia.size} selected image(s)? This cannot be undone.`)) return;
 
-    selectedMedia.forEach(async (filename) => {
-      await deleteMedia(filename);
+    const deletePromises = Array.from(selectedMedia).map(async (id) => {
+      await deleteMedia(id);
     });
+    await Promise.all(deletePromises);
 
     toast.success(`${selectedMedia.size} image(s) deleted successfully`);
     clearSelection();
   };
 
-  const handleDeleteSingle = async (filename: string) => {
-    if (!window.confirm(`Delete ${filename}? This cannot be undone.`)) return;
+  const handleDeleteSingle = async (id: number) => {
+    const item = media.find(m => m.id === id);
+    if (!item) return;
+    if (!window.confirm(`Delete ${item.filename}? This cannot be undone.`)) return;
     try {
-      await deleteMedia(filename);
+      await deleteMedia(id);
       toast.success('Image deleted successfully');
     } catch (error: any) {
       toast.error(error?.response?.data?.error || 'Failed to delete image');
@@ -194,16 +197,16 @@ export const MediaPage: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
           {filteredMedia.map((item, index) => (
             <motion.div
-              key={item.filename}
+              key={item.id || item.filename}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: index * 0.02 }}
               className={`group relative aspect-square bg-dark-900 rounded-xl overflow-hidden border-2 transition-all cursor-pointer ${
-                selectedMedia.has(item.filename) ? 'border-primary-500' : 'border-dark-800 hover:border-primary-500/50'
+                selectedMedia.has(item.id!) ? 'border-primary-500' : 'border-dark-800 hover:border-primary-500/50'
               }`}
               onClick={() => {
                 if (selectedMedia.size > 0) {
-                  selectMedia(item.filename, !selectedMedia.has(item.filename));
+                  selectMedia(item.id!, !selectedMedia.has(item.id!));
                 } else {
                   setSelectedDetail(item);
                 }
@@ -216,8 +219,8 @@ export const MediaPage: React.FC = () => {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center gap-2 pb-3">
                 {selectedMedia.size > 0 ? (
-                  <div className={`p-2 rounded-lg ${selectedMedia.has(item.filename) ? 'bg-primary-500 text-white' : 'bg-dark-800 text-dark-400'}`}>
-                    {selectedMedia.has(item.filename) ? <Check size={16} /> : <div className="w-4 h-4 border-2 border-dark-400 rounded" />}
+                  <div className={`p-2 rounded-lg ${selectedMedia.has(item.id!) ? 'bg-primary-500 text-white' : 'bg-dark-800 text-dark-400'}`}>
+                    {selectedMedia.has(item.id!) ? <Check size={16} /> : <div className="w-4 h-4 border-2 border-dark-400 rounded" />}
                   </div>
                 ) : (
                   <>
@@ -231,7 +234,7 @@ export const MediaPage: React.FC = () => {
                     <button
                       className="p-2 bg-dark-800/80 rounded-lg text-red-400 hover:bg-red-500 transition-colors"
                       title="Delete"
-                      onClick={(e) => { e.stopPropagation(); handleDeleteSingle(item.filename); }}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteSingle(item.id!); }}
                     >
                       <Trash2 size={16} />
                     </button>
@@ -259,11 +262,11 @@ export const MediaPage: React.FC = () => {
               <tbody className="divide-y divide-dark-800">
                 {filteredMedia.map((item) => (
                   <tr
-                    key={item.filename}
-                    className={`hover:bg-dark-800/50 transition-colors cursor-pointer ${selectedMedia.has(item.filename) ? 'bg-primary-500/10' : ''}`}
+                    key={item.id || item.filename}
+                    className={`hover:bg-dark-800/50 transition-colors cursor-pointer ${selectedMedia.has(item.id!) ? 'bg-primary-500/10' : ''}`}
                     onClick={() => {
                       if (selectedMedia.size > 0) {
-                        selectMedia(item.filename, !selectedMedia.has(item.filename));
+                        selectMedia(item.id!, !selectedMedia.has(item.id!));
                       } else {
                         setSelectedDetail(item);
                       }
@@ -271,8 +274,8 @@ export const MediaPage: React.FC = () => {
                   >
                     <td className="px-4 py-3">
                       {selectedMedia.size > 0 && (
-                        <div className={`w-4 h-4 border-2 rounded ${selectedMedia.has(item.filename) ? 'bg-primary-500 border-primary-500' : 'border-dark-500'}`}>
-                          {selectedMedia.has(item.filename) && <Check size={12} className="text-white mx-auto" />}
+                        <div className={`w-4 h-4 border-2 rounded ${selectedMedia.has(item.id!) ? 'bg-primary-500 border-primary-500' : 'border-dark-500'}`}>
+                          {selectedMedia.has(item.id!) && <Check size={12} className="text-white mx-auto" />}
                         </div>
                       )}
                     </td>
@@ -306,7 +309,7 @@ export const MediaPage: React.FC = () => {
                         </button>
                         <button
                           className="p-1.5 rounded hover:bg-dark-800 text-red-400 hover:text-red-300 transition-colors"
-                          onClick={(e) => { e.stopPropagation(); handleDeleteSingle(item.filename); }}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteSingle(item.id!); }}
                           title="Delete"
                         >
                           <Trash2 size={16} />
@@ -376,7 +379,9 @@ export const MediaPage: React.FC = () => {
                         variant="secondary"
                         className="text-red-400 border-red-500/50 hover:bg-red-500/10 hover:border-red-500"
                         onClick={() => {
-                          handleDeleteSingle(selectedDetail.filename);
+                          if (selectedDetail.id) {
+                            handleDeleteSingle(selectedDetail.id);
+                          }
                           setSelectedDetail(null);
                         }}
                       >

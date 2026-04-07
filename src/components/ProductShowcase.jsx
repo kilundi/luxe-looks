@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MessageCircle, Star } from 'lucide-react';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const ASSETS_URL = import.meta.env.VITE_ASSETS_URL || 'http://localhost:3001';
+
 const ProductShowcase = ({ siteSettings }) => {
   const { whatsapp = '' } = siteSettings || {};
   const waLink = whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
@@ -79,7 +82,7 @@ const ProductShowcase = ({ siteSettings }) => {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:3001/api/products?status=published');
+      const response = await fetch(`${API_URL}/products?status=published`);
 
       if (!response.ok) {
         throw new Error('API not available');
@@ -97,7 +100,7 @@ const ProductShowcase = ({ siteSettings }) => {
         reviews: product.reviews,
         description: product.description,
         gradient: getGradientByCategory(product.category, index),
-        image: product.image ? `http://localhost:3001${product.image}` : null,
+        image: product.image ? (product.image.startsWith('http') ? product.image : `${ASSETS_URL}${product.image}`) : null,
       }));
 
       setProducts(mappedProducts);

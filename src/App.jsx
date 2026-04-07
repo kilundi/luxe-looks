@@ -15,8 +15,8 @@ import BackToTop from './components/BackToTop';
 import ScrollProgress from './components/ScrollProgress';
 import './index.css';
 
-const API_URL = 'http://localhost:3001/api';
-const ASSETS_URL = 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const ASSETS_URL = import.meta.env.VITE_ASSETS_URL || 'http://localhost:3001';
 
 function App() {
   const [siteSettings, setSiteSettings] = useState({
@@ -35,15 +35,14 @@ function App() {
   const getFaviconUrl = () => {
     const favicon = siteSettings.favicon;
     if (!favicon) return '/favicon.ico';
-    if (favicon.startsWith('http')) return favicon;
-    return `${ASSETS_URL}${favicon}`;
+    return favicon.startsWith('http') ? favicon : `${ASSETS_URL}${favicon}`;
   };
 
   const getLogoUrl = () => {
     const logo = siteSettings.logo;
     if (!logo) return undefined;
     if (logo.startsWith('http')) return logo;
-    return `${ASSETS_URL}${logo}`;
+    return logo?.startsWith('http') ? logo : logo ? `${ASSETS_URL}${logo}` : undefined;
   };
 
   const [categories, setCategories] = useState([]);

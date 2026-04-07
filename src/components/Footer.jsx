@@ -2,15 +2,16 @@ import { Heart, Camera, Video, MessageCircle } from 'lucide-react';
 import logo from '../assets/logo.png';
 import PaymentMethods from './PaymentMethods';
 
+const ASSETS_URL = import.meta.env.VITE_ASSETS_URL || 'http://localhost:3001';
+
 const Footer = ({ siteSettings, categories: footerCategories = [] }) => {
   const currentYear = new Date().getFullYear();
   const { phone_number = '', contact_email = '', whatsapp = 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK', site_name = 'Luxe Looks', logo = '', footer_description = 'Timeless beauty, modern elegance. Your destination for premium beauty and luxury products in Kenya.', instagram = '', tiktok = '', facebook = '' } = siteSettings || {};
-  const API_URL = 'http://localhost:3001';
 
   const getLogoSrc = () => {
     if (!logo) return logo;
     if (logo.startsWith('http')) return logo;
-    return `${API_URL}${logo}`;
+    return logo?.startsWith('http') ? logo : logo ? `${ASSETS_URL}${logo}` : logo;
   };
 
   const socialLinks = [

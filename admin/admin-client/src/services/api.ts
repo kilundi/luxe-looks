@@ -231,8 +231,8 @@ export const mediaService = {
     return response.data;
   },
 
-  delete: async (filename: string) => {
-    const response = await api.delete<{ message: string }>(`/media/${filename}`);
+  delete: async (id: number) => {
+    const response = await api.delete<{ message: string }>(`/media/${id}`);
     return response.data;
   },
 };
