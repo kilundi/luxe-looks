@@ -332,7 +332,7 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
               </Button>
               <Button
                 onClick={handleUpload}
-                disabled={!isValid() || isUploading}
+                disabled={!isValid || isUploading}
                 className="gap-2"
               >
                 {isUploading ? (
