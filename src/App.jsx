@@ -29,15 +29,24 @@ function App() {
     twitter: '',
   });
 
+  const [categories, setCategories] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   useEffect(() => {
-    fetch(`${API_URL}/site`)
-      .then(res => res.json())
-      .then(data => {
-        if (data && Object.keys(data).length > 0) {
-          setSiteSettings(prev => ({ ...prev, ...data }));
+    Promise.all([
+      fetch(`${API_URL}/site`).then(res => res.json()),
+      fetch(`${API_URL}/categories?active=true`).then(res => res.json())
+    ])
+      .then(([settingsData, categoriesData]) => {
+        if (settingsData && Object.keys(settingsData).length > 0) {
+          setSiteSettings(prev => ({ ...prev, ...settingsData }));
+        }
+        if (Array.isArray(categoriesData)) {
+          setCategories(categoriesData);
         }
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setIsLoading(false));
   }, []);
 
   return (
@@ -75,7 +84,7 @@ function App() {
         <Navigation siteSettings={siteSettings} />
         <main id="main-content">
           <Hero siteSettings={siteSettings} />
-          <ProductCategories siteSettings={siteSettings} />
+          {!isLoading && <ProductCategories siteSettings={siteSettings} categories={categories} />}
           <ProductShowcase siteSettings={siteSettings} />
           <About siteSettings={siteSettings} />
           <Reviews />

@@ -96,6 +96,7 @@ db.serialize(() => {
     name TEXT UNIQUE NOT NULL,
     slug TEXT UNIQUE NOT NULL,
     description TEXT,
+    subtitle TEXT,
     icon TEXT,
     color TEXT DEFAULT '#D4AF37',
     sort_order INTEGER DEFAULT 0,
@@ -1316,15 +1317,23 @@ app.get('/api/dashboard/stats', authenticateTokenWithSession, (req, res) => {
 
 // Get all categories with product counts
 app.get('/api/categories', (req, res) => {
-  db.all(`
+  const { active } = req.query;
+  let query = `
     SELECT
       c.*,
       COUNT(p.id) as product_count
     FROM categories c
     LEFT JOIN products p ON c.name = p.category
-    GROUP BY c.id
-    ORDER BY c.sort_order ASC, c.name ASC
-  `, (err, rows) => {
+  `;
+  const params = [];
+  
+  if (active === 'true') {
+    query += ' WHERE c.is_active = 1';
+  }
+  
+  query += ' GROUP BY c.id ORDER BY c.sort_order ASC, c.name ASC';
+  
+  db.all(query, params, (err, rows) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -1356,16 +1365,16 @@ app.get('/api/categories/:id', (req, res) => {
 
 // Create category
 app.post('/api/categories', authenticateTokenWithSession, (req, res) => {
-  const { name, slug, description, icon, color, sort_order, is_active } = req.body;
+  const { name, slug, description, subtitle, icon, color, sort_order, is_active } = req.body;
 
   if (!name || !slug) {
     return res.status(400).json({ error: 'Name and slug are required' });
   }
 
   db.run(
-    `INSERT INTO categories (name, slug, description, icon, color, sort_order, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [name, slug, description || null, icon || null, color || '#D4AF37', sort_order || 0, is_active !== undefined ? is_active : 1],
+    `INSERT INTO categories (name, slug, description, subtitle, icon, color, sort_order, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name, slug, description || null, subtitle || null, icon || null, color || '#D4AF37', sort_order || 0, is_active !== undefined ? is_active : 1],
     function (err) {
       if (err) {
         if (err.message.includes('UNIQUE constraint failed')) {
@@ -1378,6 +1387,7 @@ app.post('/api/categories', authenticateTokenWithSession, (req, res) => {
         name,
         slug,
         description: description || null,
+        subtitle: subtitle || null,
         icon: icon || null,
         color: color || '#D4AF37',
         sort_order: sort_order || 0,
@@ -1393,7 +1403,7 @@ app.post('/api/categories', authenticateTokenWithSession, (req, res) => {
 
 // Update category
 app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
-  const { name, slug, description, icon, color, sort_order, is_active } = req.body;
+  const { name, slug, description, subtitle, icon, color, sort_order, is_active } = req.body;
   const categoryId = req.params.id;
 
   db.get('SELECT * FROM categories WHERE id = ?', [categoryId], (err, category) => {
@@ -1403,12 +1413,13 @@ app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
 
     db.run(
       `UPDATE categories
-       SET name = ?, slug = ?, description = ?, icon = ?, color = ?, sort_order = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+       SET name = ?, slug = ?, description = ?, subtitle = ?, icon = ?, color = ?, sort_order = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         name || category.name,
         slug || category.slug,
         description !== undefined ? description : category.description,
+        subtitle !== undefined ? subtitle : category.subtitle,
         icon !== undefined ? icon : category.icon,
         color || category.color,
         sort_order !== undefined ? sort_order : category.sort_order,
@@ -1427,6 +1438,7 @@ app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
           name: name || category.name,
           slug: slug || category.slug,
           description: description !== undefined ? description : category.description,
+          subtitle: subtitle !== undefined ? subtitle : category.subtitle,
           icon: icon !== undefined ? icon : category.icon,
           color: color || category.color,
           sort_order: sort_order !== undefined ? sort_order : category.sort_order,

@@ -1,15 +1,35 @@
 import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Tag, Plus, Edit2, Trash2, GripVertical } from 'lucide-react';
+import { Tag, Plus, Edit2, Trash2, GripVertical, Sparkles, Heart, ShoppingBag, Watch, Gem, Palette, Crown, Droplets, Scissors, Feather, Baby, Glasses, Umbrella, Sun, Anchor, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/common/Card';
 import { Button } from '@/components/ui/Button';
 import { useCategoryStore } from '@/store/useCategoryStore';
 import toast from 'react-hot-toast';
 
+const ICON_OPTIONS = [
+  { value: 'sparkles', label: 'Sparkles', icon: Sparkles },
+  { value: 'heart', label: 'Heart', icon: Heart },
+  { value: 'shoppingbag', label: 'Bag', icon: ShoppingBag },
+  { value: 'watch', label: 'Watch', icon: Watch },
+  { value: 'gem', label: 'Gem', icon: Gem },
+  { value: 'palette', label: 'Palette', icon: Palette },
+  { value: 'crown', label: 'Crown', icon: Crown },
+  { value: 'droplets', label: 'Droplets', icon: Droplets },
+  { value: 'scissors', label: 'Scissors', icon: Scissors },
+  { value: 'feather', label: 'Feather', icon: Feather },
+  { value: 'baby', label: 'Baby', icon: Baby },
+  { value: 'glasses', label: 'Glasses', icon: Glasses },
+  { value: 'umbrella', label: 'Umbrella', icon: Umbrella },
+  { value: 'sun', label: 'Sun', icon: Sun },
+  { value: 'anchor', label: 'Anchor', icon: Anchor },
+  { value: 'zap', label: 'Zap', icon: Zap },
+];
+
 interface CategoryFormData {
   name: string;
   slug: string;
   description: string;
+  subtitle: string;
   icon: string;
   color: string;
   sort_order: number;
@@ -20,6 +40,7 @@ const INITIAL_FORM_DATA: CategoryFormData = {
   name: '',
   slug: '',
   description: '',
+  subtitle: '',
   icon: '',
   color: '#D4AF37',
   sort_order: 0,
@@ -54,6 +75,7 @@ export const CategoriesPage: React.FC = () => {
       name: category.name,
       slug: category.slug,
       description: category.description || '',
+      subtitle: category.subtitle || '',
       icon: category.icon || '',
       color: category.color,
       sort_order: category.sort_order,
@@ -236,15 +258,15 @@ export const CategoriesPage: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-dark-900 rounded-2xl border border-dark-800 w-full max-w-lg"
+            className="bg-dark-900 rounded-2xl border border-dark-800 w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
           >
-            <div className="p-6 border-b border-dark-800">
+            <div className="p-6 border-b border-dark-800 shrink-0">
               <h2 className="text-2xl font-serif font-bold text-white">
                 {editingCategory ? 'Edit Category' : 'Add Category'}
               </h2>
             </div>
             <form onSubmit={handleSubmit}>
-              <div className="p-6 space-y-4">
+              <div className="p-6 space-y-4 overflow-y-auto max-h-[60vh] scrollbar-thin scrollbar-thumb-dark-700 scrollbar-track-dark-800">
                 <div>
                   <label className="block text-sm font-medium text-dark-300 mb-2">Name</label>
                   <input
@@ -279,25 +301,55 @@ export const CategoriesPage: React.FC = () => {
                     placeholder="Brief description..."
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">Subtitle</label>
+                  <input
+                    type="text"
+                    value={formData.subtitle}
+                    onChange={(e) => setFormData({ ...formData, subtitle: e.target.value })}
+                    className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder="e.g., Oil-Based Perfumes"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">Icon</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {ICON_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, icon: opt.value })}
+                        className={`p-3 rounded-lg border flex flex-col items-center gap-1 transition-colors ${
+                          formData.icon === opt.value
+                            ? 'border-primary-500 bg-primary-500/20 text-primary-400'
+                            : 'border-dark-700 bg-dark-800 text-dark-400 hover:border-dark-600'
+                        }`}
+                      >
+                        <opt.icon size={20} />
+                        <span className="text-xs">{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="min-w-0">
                     <label className="block text-sm font-medium text-dark-300 mb-2">Color</label>
                     <div className="flex gap-2">
                       <input
                         type="color"
                         value={formData.color}
                         onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        className="w-12 h-10 bg-dark-800 border border-dark-700 rounded cursor-pointer"
+                        className="w-12 h-10 bg-dark-800 border border-dark-700 rounded cursor-pointer shrink-0"
                       />
                       <input
                         type="text"
                         value={formData.color}
                         onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        className="flex-1 px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm"
+                        className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm"
                       />
                     </div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <label className="block text-sm font-medium text-dark-300 mb-2">Sort Order</label>
                     <input
                       type="number"
