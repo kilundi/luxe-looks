@@ -2486,16 +2486,6 @@ app.post('/api/media/upload', authenticateTokenWithSession, (req, res) => {
         size_formatted: formatBytes(file.size),
         uploaded_at: result.rows[0].uploaded_at
       });
-
-      uploadedFiles.push({
-        id: 0, // Will be set after insert
-        filename,
-        path: filePath,
-        size: file.size,
-        size_formatted: formatBytes(file.size),
-        uploaded_at: new Date().toISOString(),
-        product_count: 0
-      });
     }
 
     // Log each uploaded file
