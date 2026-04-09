@@ -50,12 +50,6 @@ export const Dashboard: React.FC = () => {
     try {
       const data = await dashboardService.getStats();
       setStats(data);
-
-      // Fetch status distribution (draft/published/archived)
-      // We'll calculate from products if available or make a separate query
-      // For now, we can add this to the API response later, but we'll compute locally
-      // Since we don't have products list here easily, we'll skip for now or compute from data
-      // Actually we don't have product status counts in current API - could be added later
     } catch (err: any) {
       console.error('Failed to fetch dashboard stats:', err);
       setError(err?.response?.data?.error || 'Failed to load dashboard statistics');
@@ -65,29 +59,37 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Prepare stats for display
-  const displayStats = stats || {
-    totalProducts: 0,
-    totalCategories: 0,
-    averageRating: '0.0',
-    totalReviews: 0,
-    changes: { products: '0', categories: 0, rating: '0', reviews: 0 },
-    recentProducts: [],
-    categoryData: [],
+  // Prepare stats for display - with proper null checks
+  const displayStats = {
+    totalProducts: stats?.totalProducts ?? 0,
+    totalCategories: stats?.totalCategories ?? 0,
+    averageRating: stats?.averageRating ?? '0.0',
+    totalReviews: stats?.totalReviews ?? 0,
+    changes: {
+      products: stats?.changes?.products ?? '0',
+      categories: stats?.changes?.categories ?? 0,
+      rating: stats?.changes?.rating ?? '0',
+      reviews: stats?.changes?.reviews ?? 0,
+    },
+    recentProducts: stats?.recentProducts ?? [],
+    categoryData: (stats?.categoryData ?? []).map((item: any) => ({
+      name: item.name,
+      count: Number(item.count) || 0
+    })),
   };
 
   const statCards = [
     {
       title: 'Total Products',
-      value: displayStats.totalProducts.toString(),
-      change: `${displayStats.changes.products >= 0 ? '+' : ''}${displayStats.changes.products}%`,
-      trend: displayStats.changes.products >= 0 ? 'up' : 'down',
+      value: String(displayStats.totalProducts),
+      change: `${Number(displayStats.changes.products) >= 0 ? '+' : ''}${displayStats.changes.products}%`,
+      trend: Number(displayStats.changes.products) >= 0 ? 'up' : 'down',
       icon: Package,
       color: 'bg-blue-500',
     },
     {
       title: 'Categories',
-      value: displayStats.totalCategories.toString(),
+      value: String(displayStats.totalCategories),
       change: `${displayStats.changes.categories >= 0 ? '+' : ''}${displayStats.changes.categories}`,
       trend: displayStats.changes.categories >= 0 ? 'up' : 'down',
       icon: Tag,
@@ -96,8 +98,8 @@ export const Dashboard: React.FC = () => {
     {
       title: 'Average Rating',
       value: displayStats.averageRating,
-      change: `${displayStats.changes.rating >= 0 ? '+' : ''}${displayStats.changes.rating}`,
-      trend: displayStats.changes.rating >= 0 ? 'up' : 'down',
+      change: `${Number(displayStats.changes.rating) >= 0 ? '+' : ''}${displayStats.changes.rating}`,
+      trend: Number(displayStats.changes.rating) >= 0 ? 'up' : 'down',
       icon: Star,
       color: 'bg-yellow-500',
     },

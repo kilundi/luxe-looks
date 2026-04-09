@@ -49,10 +49,16 @@ export interface MediaItem {
 export interface DashboardStats {
   totalProducts: number;
   totalCategories: number;
-  averageRating: number;
+  averageRating: string;
   totalReviews: number;
+  changes: {
+    products: string;
+    categories: number;
+    rating: string;
+    reviews: number;
+  };
   recentProducts: Product[];
-  productsByCategory: { name: string; count: number }[];
+  categoryData: { name: string; count: number }[];
 }
 
 export interface ApiResponse<T> {

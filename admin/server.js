@@ -65,6 +65,9 @@ app.use(express.json());
 // Serve admin assets (JS/CSS)
 app.use('/admin/assets', express.static(path.join(__dirname, 'dist/assets')));
 
+// Serve admin logo
+app.use('/logo.png', express.static(path.join(__dirname, 'dist/logo.png')));
+
 // Serve uploads folder only if not using S3
 if (!isS3Configured()) {
   app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -153,6 +156,24 @@ pool.query(`
     expires_at TIMESTAMP NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )
+`);
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key VARCHAR(255) PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+// Insert default settings if not exists
+pool.query(`
+  INSERT INTO settings (key, value) VALUES 
+    ('site_name', 'Luxe Looks'),
+    ('logo', ''),
+    ('favicon', ''),
+    ('whatsapp', 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK')
+  ON CONFLICT (key) DO NOTHING
 `);
 
 // Activity logging helper
@@ -1349,55 +1370,56 @@ app.get('/api/dashboard/stats', authenticateTokenWithSession, async (req, res) =
     // Query all stats in parallel
     const statsQuery = `
       SELECT
-        -- Current totals (all time)
         COUNT(*) as currentTotalProducts,
-        -- Previous total (products that existed at start of current month)
         COUNT(CASE WHEN created_at < $1 THEN 1 END) as previousTotalProducts,
-        -- Categories
         (SELECT COUNT(*) FROM categories) as currentTotalCategories,
         (SELECT COUNT(*) FROM categories WHERE created_at < $2) as previousTotalCategories,
-        -- Average rating (all products vs products existing at start of month)
         AVG(rating) as currentAvgRating,
         AVG(CASE WHEN created_at < $3 THEN rating END) as previousAvgRating,
-        -- Total reviews
         SUM(reviews) as currentTotalReviews,
         SUM(CASE WHEN created_at < $4 THEN reviews END) as previousTotalReviews
       FROM products
     `;
 
     const params = [
-      formatDate(currentMonthStart), // for previousTotalProducts
-      formatDate(currentMonthStart), // for previousTotalCategories
-      formatDate(currentMonthStart), // for previousAvgRating
-      formatDate(currentMonthStart)  // for previousTotalReviews
+      formatDate(currentMonthStart),
+      formatDate(currentMonthStart),
+      formatDate(currentMonthStart),
+      formatDate(currentMonthStart)
     ];
 
     const result = await pool.query(statsQuery, params);
     const data = result.rows[0];
 
-    // Calculate changes
-    const previousTotalProducts = data.previousTotalProducts || 1; // avoid divide by zero
-    const productsChange = ((data.currentTotalProducts - previousTotalProducts) / previousTotalProducts) * 100;
+    // PostgreSQL returns lowercase column names
+    const currentTotalProducts = parseInt(data.currenttotalproducts) || 0;
+    const previousTotalProducts = parseInt(data.previoustotalproducts) || 0;
+    const productsChange = previousTotalProducts > 0 
+      ? ((currentTotalProducts - previousTotalProducts) / previousTotalProducts) * 100 
+      : (currentTotalProducts > 0 ? 100 : 0);
 
-    const previousTotalCategories = data.previousTotalCategories || 1;
-    const categoriesChange = data.currentTotalCategories - previousTotalCategories;
+    const currentTotalCategories = parseInt(data.currenttotalcategories) || 0;
+    const previousTotalCategories = parseInt(data.previoustotalcategories) || 0;
+    const categoriesChange = currentTotalCategories - previousTotalCategories;
 
-    const previousAvgRating = data.previousAvgRating || data.currentAvgRating;
-    const ratingChange = (data.currentAvgRating || 0) - (previousAvgRating || 0);
+    const currentAvgRating = parseFloat(data.currentavgrating) || 0;
+    const previousAvgRating = parseFloat(data.previousavgrating) || currentAvgRating;
+    const ratingChange = currentAvgRating - previousAvgRating;
 
-    const previousTotalReviews = data.previousTotalReviews || 0;
-    const reviewsChange = (data.currentTotalReviews || 0) - previousTotalReviews;
+    const currentTotalReviews = parseInt(data.currenttotalreviews) || 0;
+    const previousTotalReviews = parseInt(data.previoustotalreviews) || 0;
+    const reviewsChange = currentTotalReviews - previousTotalReviews;
 
     const stats = {
-      totalProducts: data.currentTotalProducts || 0,
-      totalCategories: data.currentTotalCategories || 0,
-      averageRating: data.currentAvgRating ? parseFloat(data.currentAvgRating).toFixed(1) : '0.0',
-      totalReviews: data.currentTotalReviews || 0,
+      totalProducts: currentTotalProducts,
+      totalCategories: currentTotalCategories,
+      averageRating: currentAvgRating.toFixed(1),
+      totalReviews: currentTotalReviews,
       changes: {
-        products: productsChange.toFixed(1), // percentage
-        categories: categoriesChange, // absolute number
-        rating: ratingChange.toFixed(1), // absolute difference
-        reviews: reviewsChange // absolute number
+        products: productsChange.toFixed(1),
+        categories: categoriesChange,
+        rating: ratingChange.toFixed(1),
+        reviews: reviewsChange
       }
     };
 
@@ -1417,7 +1439,7 @@ app.get('/api/dashboard/stats', authenticateTokenWithSession, async (req, res) =
     // Transform to match frontend expected format: { name, count }
     const formattedCategoryData = categoryData.map(item => ({
       name: item.category,
-      count: item.count
+      count: parseInt(item.count) || 0
     }));
 
     res.json({
