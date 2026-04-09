@@ -14,8 +14,10 @@ import {
   X,
   Shield,
   History,
+  Star,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 
 const DEFAULT_LOGO = '/logo.png';
 const ASSETS_URL = 'http://localhost:3001';
@@ -24,6 +26,7 @@ const navItems = [
   { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/admin/products', icon: Package, label: 'Products' },
   { to: '/admin/categories', icon: Tag, label: 'Categories' },
+  { to: '/admin/reviews', icon: Star, label: 'Reviews' },
   { to: '/admin/media', icon: Image, label: 'Media Library' },
   { to: '/admin/sessions', icon: Shield, label: 'Sessions' },
   { to: '/admin/activity-logs', icon: History, label: 'Activity Log' },

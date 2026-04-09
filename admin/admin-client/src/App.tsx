@@ -23,6 +23,7 @@ import { MediaPage } from '@/components/pages/MediaPage';
 import { SettingsPage } from '@/components/pages/SettingsPage';
 import { SessionsPage } from '@/components/pages/SessionsPage';
 import { ActivityLogPage } from '@/components/pages/ActivityLogPage';
+import { ReviewsPage } from '@/components/pages/ReviewsPage';
 
 // Login Page Component
 const LoginPage = () => {
@@ -957,6 +958,7 @@ const App = () => {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="products" element={<ProductsPage />} />
           <Route path="categories" element={<CategoriesPage />} />
+          <Route path="reviews" element={<ReviewsPage />} />
           <Route path="media" element={<MediaPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="sessions" element={<SessionsPage />} />

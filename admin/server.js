@@ -176,6 +176,31 @@ pool.query(`
   ON CONFLICT (key) DO NOTHING
 `);
 
+pool.query(`
+  CREATE TABLE IF NOT EXISTS reviews (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    location VARCHAR(255),
+    rating INTEGER DEFAULT 5,
+    text TEXT NOT NULL,
+    is_verified BOOLEAN DEFAULT true,
+    avatar VARCHAR(10),
+    is_active BOOLEAN DEFAULT true,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).then(() => {
+  // Insert default reviews after table is created
+  return pool.query(`
+    INSERT INTO reviews (name, location, rating, text, is_verified, avatar, sort_order) VALUES 
+      ('Jane Wairimu', 'Nairobi', 5, 'Absolutely love Luxe Looks! The perfumes are long-lasting and the quality is unmatched. Fast delivery and excellent customer service. My go-to for luxury beauty products in Kenya.', true, 'JW', 1),
+      ('Titus Muthiani', 'Mombasa', 5, 'Premium quality human hair at an amazing price. The team is very helpful on WhatsApp and answered all my questions. Delivery was super fast. Highly recommend!', true, 'TM', 2),
+      ('Sarah K.', 'Kisumu', 5, 'Finally found authentic designer perfumes in Kenya! The oil-based fragrances last all day. Luxe Looks has exceeded my expectations. Will definitely be ordering again.', true, 'SK', 3)
+    ON CONFLICT DO NOTHING
+  `);
+});
+
 // Activity logging helper
 function logActivity(req, action, entity_type, entity_id, old_value, new_value) {
   const user_id = req.user ? req.user.id : null;
@@ -1622,6 +1647,110 @@ app.post('/api/categories/reorder', authenticateTokenWithSession, async (req, re
       return res.status(500).json({ error: errors.join(', ') });
     }
     res.json({ message: 'Categories reordered successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== REVIEWS API ====================
+
+// Get all reviews (public)
+app.get('/api/reviews', async (req, res) => {
+  try {
+    const { active } = req.query;
+    let query = 'SELECT * FROM reviews';
+    const params = [];
+
+    if (active === 'true') {
+      query += ' WHERE is_active = true';
+    }
+
+    query += ' ORDER BY sort_order ASC, created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Get single review
+app.get('/api/reviews/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM reviews WHERE id = $1', [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Create review
+app.post('/api/reviews', authenticateTokenWithSession, async (req, res) => {
+  const { name, location, rating, text, is_verified, avatar, sort_order, is_active } = req.body;
+
+  if (!name || !text) {
+    return res.status(400).json({ error: 'Name and review text are required' });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO reviews (name, location, rating, text, is_verified, avatar, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [name, location || null, rating || 5, text, is_verified !== undefined ? is_verified : true, avatar || name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0,2), sort_order || 0, is_active !== undefined ? is_active : true]
+    );
+    const newReview = result.rows[0];
+    logActivity(req, 'create', 'review', newReview.id, null, newReview);
+    res.json(newReview);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Update review
+app.put('/api/reviews/:id', authenticateTokenWithSession, async (req, res) => {
+  const { id } = req.params;
+  const { name, location, rating, text, is_verified, avatar, sort_order, is_active } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE reviews
+       SET name = $1, location = $2, rating = $3, text = $4, is_verified = $5, avatar = $6, sort_order = $7, is_active = $8, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $9
+       RETURNING *`,
+      [name, location, rating, text, is_verified, avatar, sort_order, is_active, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+
+    const updatedReview = result.rows[0];
+    logActivity(req, 'update', 'review', parseInt(id), null, updatedReview);
+    res.json(updatedReview);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete review
+app.delete('/api/reviews/:id', authenticateTokenWithSession, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query('DELETE FROM reviews WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+
+    logActivity(req, 'delete', 'review', parseInt(id), result.rows[0], null);
+    res.json({ message: 'Review deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

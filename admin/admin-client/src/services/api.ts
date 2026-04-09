@@ -300,6 +300,49 @@ export const settingsService = {
   },
 };
 
+// Review type
+export interface Review {
+  id: number;
+  name: string;
+  location: string;
+  rating: number;
+  text: string;
+  is_verified: boolean;
+  avatar: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Reviews service
+export const reviewService = {
+  getAll: async () => {
+    const response = await api.get<Review[]>('/reviews');
+    return response.data;
+  },
+
+  getById: async (id: number) => {
+    const response = await api.get<Review>(`/reviews/${id}`);
+    return response.data;
+  },
+
+  create: async (review: Partial<Review>) => {
+    const response = await api.post<Review>('/reviews', review);
+    return response.data;
+  },
+
+  update: async (id: number, review: Partial<Review>) => {
+    const response = await api.put<Review>(`/reviews/${id}`, review);
+    return response.data;
+  },
+
+  delete: async (id: number) => {
+    const response = await api.delete<{ message: string }>(`/reviews/${id}`);
+    return response.data;
+  },
+};
+
 // Activity Log service
 export const activityLogService = {
   getAll: async (filters?: ActivityLogFilters) => {
