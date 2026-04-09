@@ -245,7 +245,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                   </span>
                 </td>
                 <td className="table-cell font-medium text-primary-500">
-                  {product.price}
+                  {product.price ? `KSh ${parseFloat(product.price.replace(/[KSh,\s]/gi, '')).toLocaleString()}` : '-'}
                 </td>
                 <td className="table-cell">
                   <div className="flex items-center gap-2">

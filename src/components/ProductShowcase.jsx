@@ -91,17 +91,31 @@ const ProductShowcase = ({ siteSettings }) => {
       const data = await response.json();
 
       // Map API products to component format
-      const mappedProducts = data.items.map((product, index) => ({
-        id: product.id,
-        name: product.name,
-        category: product.category,
-        price: product.price,
-        rating: product.rating,
-        reviews: product.reviews,
-        description: product.description,
-        gradient: getGradientByCategory(product.category, index),
-        image: product.image ? (product.image.startsWith('http') ? product.image : `${ASSETS_URL}${product.image}`) : null,
-      }));
+      const mappedProducts = data.items.map((product, index) => {
+        // Format price with KSh prefix
+        let formattedPrice = product.price;
+        if (product.price) {
+          // Remove any existing KSh or currency symbols and spaces
+          const numericPrice = product.price.replace(/[KSh,\s]/gi, '').trim();
+          // Format with commas and add KSh prefix
+          const num = parseFloat(numericPrice);
+          if (!isNaN(num)) {
+            formattedPrice = `KSh ${num.toLocaleString()}`;
+          }
+        }
+        
+        return {
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          price: formattedPrice,
+          rating: product.rating,
+          reviews: product.reviews,
+          description: product.description,
+          gradient: getGradientByCategory(product.category, index),
+          image: product.image ? (product.image.startsWith('http') ? product.image : `${ASSETS_URL}${product.image}`) : null,
+        };
+      });
 
       setProducts(mappedProducts);
     } catch (error) {
