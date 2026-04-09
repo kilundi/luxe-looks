@@ -68,7 +68,7 @@ const Navigation = ({ siteSettings }) => {
               <img
                 src={getLogoSrc()}
                 alt={siteName}
-                className="h-12 md:h-14 w-auto"
+                className="h-12 md:h-14 w-auto rounded-full"
               />
               <span className="hidden lg:block text-xl font-serif font-bold text-primary tracking-wide">
                 {siteName}

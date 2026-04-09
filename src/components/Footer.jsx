@@ -48,7 +48,7 @@ const Footer = ({ siteSettings, categories: footerCategories = [] }) => {
             <img
               src={getLogoSrc()}
               alt={site_name}
-              className="h-16 w-auto"
+              className="h-16 w-auto rounded-full"
             />
             <p className="text-gray-400 leading-relaxed">
               {footer_description}

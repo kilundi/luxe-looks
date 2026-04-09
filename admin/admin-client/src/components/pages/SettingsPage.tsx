@@ -486,6 +486,89 @@ export const SettingsPage: React.FC = () => {
                   </div>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Google Maps Embed</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Contact Page Map Embed Code
+                    </label>
+                    <textarea
+                      value={settings.map_embed_contact}
+                      onChange={(e) => handleSettingChange('map_embed_contact', e.target.value)}
+                      rows={4}
+                      placeholder="Paste Google Maps embed iframe code here..."
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
+                    />
+                    <p className="text-xs text-dark-500 mt-2">
+                      Get embed code from Google Maps: Share → Embed a map → Copy HTML
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Contact Map Title
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.contact_map_title}
+                      onChange={(e) => handleSettingChange('contact_map_title', e.target.value)}
+                      placeholder="Visit Our Store"
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Contact Map Subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.contact_map_subtitle}
+                      onChange={(e) => handleSettingChange('contact_map_subtitle', e.target.value)}
+                      placeholder="We'd love to hear from you"
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      About Page Map Embed Code
+                    </label>
+                    <textarea
+                      value={settings.map_embed_about}
+                      onChange={(e) => handleSettingChange('map_embed_about', e.target.value)}
+                      rows={4}
+                      placeholder="Paste Google Maps embed iframe code here..."
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Delivery Map Title
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.delivery_map_title}
+                      onChange={(e) => handleSettingChange('delivery_map_title', e.target.value)}
+                      placeholder="Delivery Locations"
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      Delivery Map Subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.delivery_map_subtitle}
+                      onChange={(e) => handleSettingChange('delivery_map_subtitle', e.target.value)}
+                      placeholder="We deliver across Kenya"
+                      className="w-full px-4 py-2 bg-dark-900 border border-dark-800 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
             </motion.div>
           )}
 

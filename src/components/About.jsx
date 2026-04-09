@@ -1,6 +1,15 @@
 import { motion } from 'framer-motion';
 import { Truck, Shield, Clock, Award, MapPin } from 'lucide-react';
 
+const extractSrcFromIframe = (input) => {
+  if (!input) return '';
+  if (input.includes('<iframe')) {
+    const match = input.match(/src=["']([^"']+)["']/);
+    return match ? match[1] : input;
+  }
+  return input;
+};
+
 const About = ({ siteSettings }) => {
   const whatsapp = siteSettings?.whatsapp || 'https://chat.whatsapp.com/Gb8xGhuAacOJzY7cuMO5tK';
   const map_embed_about = siteSettings?.map_embed_about || '';
@@ -145,7 +154,7 @@ const About = ({ siteSettings }) => {
             {map_embed_about ? (
               <div className="max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl border border-gray-800">
                 <iframe
-                  src={map_embed_about}
+                  src={extractSrcFromIframe(map_embed_about)}
                   width="100%"
                   height="400"
                   style={{ border: 0 }}

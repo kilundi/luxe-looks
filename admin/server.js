@@ -7,7 +7,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -68,7 +68,7 @@ app.use('/admin/assets', express.static(path.join(__dirname, 'dist/assets')));
 // Serve uploads folder only if not using S3
 if (!isS3Configured()) {
   app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-  
+
   // Ensure uploads directory exists
   if (!fs.existsSync('./uploads')) {
     fs.mkdirSync('./uploads', { recursive: true });
@@ -76,133 +76,84 @@ if (!isS3Configured()) {
 }
 
 // Database setup
-const db = new sqlite3.Database('./luxe_looks.db');
+const pool = new Pool({
+  connectionString: process.env.RAILWAY_DB_URL || process.env.DATABASE_URL,
+});
+
+// Test database connection
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    console.error('Database connection error:', err.stack);
+  } else {
+    console.log('Connected to PostgreSQL database');
+  }
+});
 
 // Create tables
-db.serialize(() => {
-  // Users table for admin authentication
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
+pool.query(`
+  CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
     password TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
-  // Products table
-  db.run(`CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    category TEXT NOT NULL,
+pool.query(`
+  CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    category VARCHAR(255) NOT NULL,
     price TEXT NOT NULL,
     price_value REAL,
     description TEXT,
     image TEXT,
     rating REAL DEFAULT 4.0,
     reviews INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'published',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+    status VARCHAR(50) DEFAULT 'published',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
-  // Media table for tracking uploaded images
-  db.run(`CREATE TABLE IF NOT EXISTS media (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,
+pool.query(`
+  CREATE TABLE IF NOT EXISTS media (
+    id SERIAL PRIMARY KEY,
+    filename VARCHAR(255) NOT NULL,
     path TEXT NOT NULL,
     size INTEGER DEFAULT 0,
-    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
-  // Categories table
-  db.run(`CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    slug TEXT UNIQUE NOT NULL,
+pool.query(`
+  CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) UNIQUE NOT NULL,
+    slug VARCHAR(255) UNIQUE NOT NULL,
     description TEXT,
     subtitle TEXT,
     icon TEXT,
-    color TEXT DEFAULT '#D4AF37',
+    color VARCHAR(7) DEFAULT '#D4AF37',
     sort_order INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
-  // Sessions table for tracking active login sessions
-  db.run(`CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+pool.query(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
-    token_id TEXT UNIQUE NOT NULL,
-    ip_address TEXT,
+    token_id VARCHAR(255) UNIQUE NOT NULL,
+    ip_address INET,
     user_agent TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )`);
-
-  // Add missing columns to existing products table (migrations)
-  db.all("PRAGMA table_info(products)", (err, columns) => {
-    if (err) {
-      console.error('Migration ERROR checking products table:', err);
-      return;
-    }
-    const columnNames = columns ? columns.map(c => c.name) : [];
-    console.log('Products table columns:', columnNames.join(', '));
-
-    // Add status column if missing
-    if (!columnNames.includes('status')) {
-      db.run(`ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'published'`, (err) => {
-        if (err) {
-          console.error('Migration ERROR adding status column:', err.message);
-        } else {
-          console.log('Migration: Added status column to products table');
-        }
-      });
-    }
-
-    // Add price_value column if missing
-    if (!columnNames.includes('price_value')) {
-      db.run(`ALTER TABLE products ADD COLUMN price_value REAL`, (err) => {
-        if (err) {
-          console.error('Migration ERROR adding price_value column:', err.message);
-        } else {
-          console.log('Migration: Added price_value column to products table');
-          // Backfill price_value from price string after column is added
-          backfillPriceValues();
-        }
-      });
-    } else {
-      // Backfill any NULL price_values
-      backfillPriceValues();
-    }
-  });
-
-  // Backfill price_value for all products that have NULL price_value
-  function backfillPriceValues() {
-    db.all('SELECT id, price FROM products WHERE price_value IS NULL', (err, rows) => {
-      if (err) {
-        console.error('Backfill ERROR:', err);
-        return;
-      }
-      if (rows.length === 0) {
-        // console.log('Backfill: All products already have price_value');
-        return;
-      }
-      // console.log(`Backfill: Filling price_value for ${rows.length} products`);
-      const stmt = db.prepare('UPDATE products SET price_value = ? WHERE id = ?');
-      rows.forEach(row => {
-        const priceVal = parsePriceToNumber(row.price);
-        stmt.run(priceVal, row.id);
-      });
-      rows.forEach(row => {
-        const priceVal = parsePriceToNumber(row.price);
-        stmt.run(priceVal, row.id);
-      });
-      stmt.finalize();
-      // console.log('Backfill: Completed');
-    });
-  }
-});
+  )
+`);
 
 // Activity logging helper
 function logActivity(req, action, entity_type, entity_id, old_value, new_value) {
@@ -210,9 +161,9 @@ function logActivity(req, action, entity_type, entity_id, old_value, new_value) 
   const ip_address = req.ip || req.connection.remoteAddress || null;
   const user_agent = req.headers['user-agent'] || null;
 
-  db.run(
+  pool.query(
     `INSERT INTO activity_logs (user_id, action, entity_type, entity_id, old_value, new_value, ip_address, user_agent)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       user_id,
       action,
@@ -230,6 +181,28 @@ function logActivity(req, action, entity_type, entity_id, old_value, new_value) 
     }
   );
 }
+
+// Backfill price_value for all products that have NULL price_value
+async function backfillPriceValues() {
+  try {
+    const { rows } = await pool.query('SELECT id, price FROM products WHERE price_value IS NULL');
+    if (rows.length === 0) {
+      // console.log('Backfill: All products already have price_value');
+      return;
+    }
+    // console.log(`Backfill: Filling price_value for ${rows.length} products`);
+
+    for (const row of rows) {
+      const priceVal = parsePriceToNumber(row.price);
+      await pool.query('UPDATE products SET price_value = $1 WHERE id = $2', [priceVal, row.id]);
+    }
+    // console.log('Backfill: Completed');
+  } catch (err) {
+    console.error('Backfill ERROR:', err);
+  }
+}
+
+
 
 // Auth middleware
 const authenticateToken = (req, res, next) => {
@@ -273,69 +246,71 @@ app.post('/api/register', async (req, res) => {
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    db.run(
-      'INSERT INTO users (username, password) VALUES (?, ?)',
-      [username, hashedPassword],
-      function (err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ error: 'Username already exists' });
-          }
-          return res.status(500).json({ error: err.message });
-        }
-        res.status(201).json({ message: 'Admin user created successfully' });
-      }
+    const result = await pool.query(
+      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id',
+      [username, hashedPassword]
     );
+    res.status(201).json({ message: 'Admin user created successfully' });
   } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'Username already exists' });
+    }
     res.status(500).json({ error: error.message });
   }
 });
 
 // Login
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   const ip = req.ip || req.connection.remoteAddress;
   const userAgent = req.headers['user-agent'] || '';
 
-  db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
-    if (err || !user) {
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const user = rows[0];
+
+    if (!user) {
       return res.status(400).json({ error: 'Invalid credentials' });
     }
 
-    try {
-      const validPassword = await bcrypt.compare(password, user.password);
-      if (!validPassword) {
-        return res.status(400).json({ error: 'Invalid credentials' });
-      }
-
-      const tokenId = `${user.id}-${Date.now()}-${Math.random().toString(36).substring(2)}`;
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-      const token = jwt.sign(
-        { id: user.id, username: user.username, tokenId },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
-
-      await new Promise((resolve, reject) => {
-        db.run(
-          'INSERT INTO sessions (user_id, token_id, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?)',
-          [user.id, tokenId, ip, userAgent, expiresAt],
-          (err) => err ? reject(err) : resolve()
-        );
-      });
-
-      res.json({ token, user: { id: user.id, username: user.username } });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(400).json({ error: 'Invalid credentials' });
     }
-  });
+
+    // Generate a unique tokenId for session tracking
+    const tokenId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+    const token = jwt.sign({ id: user.id, username: user.username, tokenId }, JWT_SECRET, {
+      expiresIn: '7d'
+    });
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    await pool.query(
+      'INSERT INTO sessions (user_id, token_id, ip_address, user_agent, expires_at) VALUES ($1, $2, $3, $4, $5)',
+      [user.id, tokenId, ip, userAgent, expiresAt]
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email || ''
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ==================== SESSION MANAGEMENT ROUTES ====================
 
 // Enhanced token validation middleware
-const authenticateTokenWithSession = (req, res, next) => {
+const authenticateTokenWithSession = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -343,7 +318,7 @@ const authenticateTokenWithSession = (req, res, next) => {
     return res.status(401).json({ error: 'Access denied' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err) {
       return res.status(403).json({ error: 'Invalid token' });
     }
@@ -353,66 +328,66 @@ const authenticateTokenWithSession = (req, res, next) => {
       return res.status(401).json({ error: 'Token missing session identifier, please re-login' });
     }
 
-    db.get(
-      'SELECT * FROM sessions WHERE token_id = ? AND expires_at > datetime("now")',
-      [tokenId],
-      (sessionErr, session) => {
-        if (sessionErr || !session) {
-          return res.status(401).json({ error: 'Session expired or revoked, please re-login' });
-        }
-        req.user = decoded;
-        req.tokenId = tokenId;
-        next();
+    try {
+      const { rows } = await pool.query(
+        'SELECT * FROM sessions WHERE token_id = $1 AND expires_at > NOW()',
+        [tokenId]
+      );
+      const session = rows[0];
+
+      if (!session) {
+        return res.status(401).json({ error: 'Session expired or revoked, please re-login' });
       }
-    );
+      req.user = decoded;
+      req.tokenId = tokenId;
+      next();
+    } catch (error) {
+      console.error('Session validation error:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   });
 };
 
 // GET /api/sessions - List active sessions for current user
-app.get('/api/sessions', authenticateTokenWithSession, (req, res) => {
-  db.all(
-    'SELECT id, token_id, ip_address, user_agent, created_at, expires_at FROM sessions WHERE user_id = ? AND expires_at > datetime("now") ORDER BY created_at DESC',
-    [req.user.id],
-    (err, sessions) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      const sessionList = sessions.map(s => ({
-        id: s.token_id,
-        sessionId: s.id,
-        ip_address: s.ip_address,
-        user_agent: s.user_agent,
-        created_at: s.created_at,
-        expires_at: s.expires_at,
-        isCurrent: s.token_id === req.tokenId
-      }));
-      res.json({ sessions: sessionList });
-    }
-  );
+app.get('/api/sessions', authenticateTokenWithSession, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, token_id, ip_address, user_agent, created_at, expires_at FROM sessions WHERE user_id = $1 AND expires_at > NOW() ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    const sessionList = result.rows.map(s => ({
+      id: s.token_id,
+      sessionId: s.id,
+      ip_address: s.ip_address,
+      user_agent: s.user_agent,
+      created_at: s.created_at,
+      expires_at: s.expires_at,
+      isCurrent: s.token_id === req.tokenId
+    }));
+    res.json({ sessions: sessionList });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE /api/sessions/:tokenId - Revoke a specific session
-app.delete('/api/sessions/:tokenId', authenticateTokenWithSession, (req, res) => {
+app.delete('/api/sessions/:tokenId', authenticateTokenWithSession, async (req, res) => {
   const { tokenId } = req.params;
 
-  db.run('DELETE FROM sessions WHERE token_id = ? AND user_id = ?', [tokenId, req.user.id], function (err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json({ message: 'Session revoked' });
-  });
+  await pool.query('DELETE FROM sessions WHERE token_id = $1 AND user_id = $2', [tokenId, req.user.id]);
+  res.json({ message: 'Session revoked' });
 });
 
 // ==================== USER MANAGEMENT API ====================
 
 // Get all users (admin only)
-app.get('/api/users', authenticateTokenWithSession, (req, res) => {
-  db.all('SELECT id, username, created_at FROM users ORDER BY created_at DESC', (err, users) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(users);
-  });
+app.get('/api/users', authenticateTokenWithSession, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, username, created_at FROM users ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Create new user (admin only)
@@ -429,21 +404,16 @@ app.post('/api/users', authenticateTokenWithSession, async (req, res) => {
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    db.run(
-      'INSERT INTO users (username, password) VALUES (?, ?)',
-      [username, hashedPassword],
-      function (err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ error: 'Username already exists' });
-          }
-          return res.status(500).json({ error: err.message });
-        }
-        logActivity(req, 'create', 'user', this.lastID, null, { username });
-        res.json({ id: this.lastID, username, message: 'User created successfully' });
-      }
+    const result = await pool.query(
+      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id',
+      [username, hashedPassword]
     );
+    logActivity(req, 'create', 'user', result.rows[0].id, null, { username });
+    res.json({ id: result.rows[0].id, username, message: 'User created successfully' });
   } catch (err) {
+    if (err.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'Username already exists' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -458,28 +428,25 @@ app.put('/api/users/:id/password', authenticateTokenWithSession, async (req, res
   }
 
   // Check if user exists
-  db.get('SELECT * FROM users WHERE id = ?', [id], async (err, user) => {
-    if (err || !user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+  const user = rows[0];
 
-    try {
-      const hashedPassword = await bcrypt.hash(password, 10);
-      db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, id], function (err) {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        logActivity(req, 'update', 'user', parseInt(id), { username: user.username }, { password: '***' });
-        res.json({ message: 'Password updated successfully' });
-      });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, id]);
+    logActivity(req, 'update', 'user', parseInt(id), { username: user.username }, { password: '***' });
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Delete user (admin only)
-app.delete('/api/users/:id', authenticateTokenWithSession, (req, res) => {
+app.delete('/api/users/:id', authenticateTokenWithSession, async (req, res) => {
   const { id } = req.params;
 
   // Prevent deleting yourself
@@ -487,20 +454,22 @@ app.delete('/api/users/:id', authenticateTokenWithSession, (req, res) => {
     return res.status(400).json({ error: 'Cannot delete your own account' });
   }
 
-  db.get('SELECT * FROM users WHERE id = ?', [id], (err, user) => {
-    if (err || !user) {
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+    const user = rows[0];
+
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    db.run('DELETE FROM users WHERE id = ?', [id], function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      db.run('DELETE FROM sessions WHERE user_id = ?', [id]);
-      logActivity(req, 'delete', 'user', parseInt(id), { username: user.username }, null);
-      res.json({ message: 'User deleted successfully' });
-    });
-  });
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    await pool.query('DELETE FROM sessions WHERE user_id = $1', [id]);
+    logActivity(req, 'delete', 'user', parseInt(id), { username: user.username }, null);
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Password Reset - Request (generates reset code stored in memory)
@@ -508,37 +477,41 @@ const resetCodes = new Map();
 
 app.post('/api/users/reset-request', async (req, res) => {
   const { username } = req.body;
-  
+
   if (!username) {
     return res.status(400).json({ error: 'Username is required' });
   }
 
-  db.get('SELECT id, username FROM users WHERE username = ?', [username], async (err, user) => {
-    if (err || !user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+  const { rows } = await pool.query(
+    'SELECT id, username FROM users WHERE username = $1',
+    [username]
+  );
+  const user = rows[0];
 
-    // Generate 6-digit reset code
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Store code with 10 minute expiry
-    resetCodes.set(username, {
-      code: resetCode,
-      expires: Date.now() + 10 * 60 * 1000
-    });
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
 
-    // In production, send via email - for now, return code (for testing)
-    res.json({ 
-      message: 'Reset code generated',
-      // Remove this in production - code should be sent via email
-      debugCode: resetCode 
-    });
+  // Generate 6-digit reset code
+  const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+  // Store code with 10 minute expiry
+  resetCodes.set(username, {
+    code: resetCode,
+    expires: Date.now() + 10 * 60 * 1000
+  });
+
+  // In production, send via email - for now, return code (for testing)
+  res.json({
+    message: 'Reset code generated',
+    // Remove this in production - code should be sent via email
+    debugCode: resetCode
   });
 });
 
 app.post('/api/users/reset-password', async (req, res) => {
   const { username, resetCode, newPassword } = req.body;
-  
+
   if (!username || !resetCode || !newPassword) {
     return res.status(400).json({ error: 'All fields are required' });
   }
@@ -548,7 +521,7 @@ app.post('/api/users/reset-password', async (req, res) => {
   }
 
   const stored = resetCodes.get(username);
-  
+
   if (!stored) {
     return res.status(400).json({ error: 'No reset request found' });
   }
@@ -564,34 +537,29 @@ app.post('/api/users/reset-password', async (req, res) => {
 
   try {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    
-    db.run('UPDATE users SET password = ? WHERE username = ?', [hashedPassword, username], (err) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      
-      resetCodes.delete(username);
-      db.run('DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)', [username]);
-      
-      res.json({ message: 'Password reset successful' });
-    });
+
+    await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hashedPassword, username]);
+
+    resetCodes.delete(username);
+    await pool.query('DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = $1)', [username]);
+
+    res.json({ message: 'Password reset successful' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // DELETE /api/sessions - Revoke all sessions except current
-app.delete('/api/sessions', authenticateTokenWithSession, (req, res) => {
-  db.run(
-    'DELETE FROM sessions WHERE user_id = ? AND token_id != ?',
-    [req.user.id, req.tokenId],
-    function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ message: `Revoked ${this.changes} other session(s)`, revoked: this.changes });
-    }
-  );
+app.delete('/api/sessions', authenticateTokenWithSession, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM sessions WHERE user_id = $1 AND token_id != $2',
+      [req.user.id, req.tokenId]
+    );
+    res.json({ message: `Revoked ${result.rowCount} other session(s)`, revoked: result.rowCount });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/change-password
@@ -614,34 +582,31 @@ app.post('/api/change-password', authenticateTokenWithSession, async (req, res) 
     });
   }
 
-  db.get('SELECT * FROM users WHERE id = ?', [req.user.id], async (err, user) => {
-    if (err || !user) {
-      return res.status(404).json({ error: 'User not found' });
+  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+  const user = rows[0];
+
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  try {
+    const validPassword = await bcrypt.compare(currentPassword, user.password);
+    if (!validPassword) {
+      return res.status(400).json({ error: 'Current password is incorrect' });
     }
 
-    try {
-      const validPassword = await bcrypt.compare(currentPassword, user.password);
-      if (!validPassword) {
-        return res.status(400).json({ error: 'Current password is incorrect' });
-      }
-
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, req.user.id], function (updateErr) {
-        if (updateErr) {
-          return res.status(500).json({ error: updateErr.message });
-        }
-        res.json({ message: 'Password changed successfully' });
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, req.user.id]);
+    res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ==================== PRODUCT ROUTES ====================
 
 // Get all products with filtering, pagination, and sorting
-app.get('/api/products', (req, res) => {
+app.get('/api/products', async (req, res) => {
   const {
     search,
     category,
@@ -665,91 +630,100 @@ app.get('/api/products', (req, res) => {
   // Build WHERE clause
   const conditions = [];
   const params = [];
+  let paramIndex = 1;
 
   if (search) {
-    conditions.push('(name LIKE ? OR description LIKE ?)');
+    conditions.push(`(name LIKE $${paramIndex} OR description LIKE $${paramIndex + 1})`);
     const searchTerm = `%${search}%`;
     params.push(searchTerm, searchTerm);
+    paramIndex += 2;
   }
 
   if (category) {
-    conditions.push('category = ?');
+    conditions.push(`category = $${paramIndex}`);
     params.push(category);
+    paramIndex++;
   }
 
   if (status) {
-    conditions.push('status = ?');
+    conditions.push(`status = $${paramIndex}`);
     params.push(status);
+    paramIndex++;
   }
 
   if (minPrice) {
-    conditions.push('price_value >= ?');
+    conditions.push(`price_value >= $${paramIndex}`);
     params.push(parseFloat(minPrice));
+    paramIndex++;
   }
 
   if (maxPrice) {
-    conditions.push('price_value <= ?');
+    conditions.push(`price_value <= $${paramIndex}`);
     params.push(parseFloat(maxPrice));
+    paramIndex++;
   }
 
   if (minRating) {
-    conditions.push('rating >= ?');
+    conditions.push(`rating >= $${paramIndex}`);
     params.push(parseFloat(minRating));
+    paramIndex++;
   }
 
   if (maxRating) {
-    conditions.push('rating <= ?');
+    conditions.push(`rating <= $${paramIndex}`);
     params.push(parseFloat(maxRating));
+    paramIndex++;
   }
 
   if (dateFrom) {
     // For date range, include full day (00:00:00)
     const fromDate = new Date(dateFrom);
     fromDate.setHours(0, 0, 0, 0);
-    conditions.push('created_at >= ?');
+    conditions.push(`created_at >= $${paramIndex}`);
     params.push(fromDate.toISOString());
+    paramIndex++;
   }
 
   if (dateTo) {
     // Include up to end of day (23:59:59)
     const toDate = new Date(dateTo);
     toDate.setHours(23, 59, 59, 999);
-    conditions.push('created_at <= ?');
+    conditions.push(`created_at <= $${paramIndex}`);
     params.push(toDate.toISOString());
+    paramIndex++;
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const orderByClause = `ORDER BY ${sortBy} ${orderBy}`;
 
-  // First get total count
-  const countQuery = `SELECT COUNT(*) as total FROM products ${whereClause}`;
-  db.get(countQuery, params, (err, countResult) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    const total = countResult.total;
+  try {
+    // First get total count
+    const countQuery = `SELECT COUNT(*) as total FROM products ${whereClause}`;
+    const countResult = await pool.query(countQuery, params);
+    const total = countResult.rows[0].total;
 
     // Then get paginated results
-    const dataQuery = `SELECT * FROM products ${whereClause} ${orderByClause} LIMIT ? OFFSET ?`;
+    const dataQuery = `SELECT * FROM products ${whereClause} ${orderByClause} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    // Note: params array already contains WHERE condition values
+    // We need to add limit and offset at the end for the LIMIT/OFFSET clauses
     params.push(limitInt, offset);
 
-    db.all(dataQuery, params, (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({
-        items: rows,
-        total,
-        page: parseInt(page),
-        limit: limitInt,
-        totalPages: Math.ceil(total / limitInt)
-      });
+    const result = await pool.query(dataQuery, params);
+
+    res.json({
+      items: result.rows,
+      total,
+      page: parseInt(page),
+      limit: limitInt,
+      totalPages: Math.ceil(total / limitInt)
     });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Export products to CSV or JSON
-app.get('/api/products/export', authenticateTokenWithSession, (req, res) => {
+app.get('/api/products/export', authenticateTokenWithSession, async (req, res) => {
   const {
     format = 'csv',
     search,
@@ -768,58 +742,66 @@ app.get('/api/products/export', authenticateTokenWithSession, (req, res) => {
   // Build WHERE clause (same as GET /api/products)
   const conditions = [];
   const params = [];
+  let paramIndex = 1;
 
   if (search) {
-    conditions.push('(name LIKE ? OR description LIKE ?)');
+    conditions.push(`(name LIKE $${paramIndex} OR description LIKE $${paramIndex + 1})`);
     const searchTerm = `%${search}%`;
     params.push(searchTerm, searchTerm);
+    paramIndex += 2;
   }
   if (category) {
-    conditions.push('category = ?');
+    conditions.push(`category = $${paramIndex}`);
     params.push(category);
+    paramIndex++;
   }
   if (status) {
-    conditions.push('status = ?');
+    conditions.push(`status = $${paramIndex}`);
     params.push(status);
+    paramIndex++;
   }
   if (minPrice) {
-    conditions.push('price_value >= ?');
+    conditions.push(`price_value >= $${paramIndex}`);
     params.push(parseFloat(minPrice));
+    paramIndex++;
   }
   if (maxPrice) {
-    conditions.push('price_value <= ?');
+    conditions.push(`price_value <= $${paramIndex}`);
     params.push(parseFloat(maxPrice));
+    paramIndex++;
   }
   if (minRating) {
-    conditions.push('rating >= ?');
+    conditions.push(`rating >= $${paramIndex}`);
     params.push(parseFloat(minRating));
+    paramIndex++;
   }
   if (maxRating) {
-    conditions.push('rating <= ?');
+    conditions.push(`rating <= $${paramIndex}`);
     params.push(parseFloat(maxRating));
+    paramIndex++;
   }
   if (dateFrom) {
     const fromDate = new Date(dateFrom);
     fromDate.setHours(0, 0, 0, 0);
-    conditions.push('created_at >= ?');
+    conditions.push(`created_at >= $${paramIndex}`);
     params.push(fromDate.toISOString());
+    paramIndex++;
   }
   if (dateTo) {
     const toDate = new Date(dateTo);
     toDate.setHours(23, 59, 59, 999);
-    conditions.push('created_at <= ?');
+    conditions.push(`created_at <= $${paramIndex}`);
     params.push(toDate.toISOString());
+    paramIndex++;
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const orderByClause = `ORDER BY ${sortBy} ${sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
 
-  const query = `SELECT * FROM products ${whereClause} ${orderByClause}`;
-
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    const query = `SELECT * FROM products ${whereClause} ${orderByClause}`;
+    const result = await pool.query(query, params);
+    const rows = result.rows;
 
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json');
@@ -853,24 +835,28 @@ app.get('/api/products/export', authenticateTokenWithSession, (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="products-${new Date().toISOString().split('T')[0]}.csv"`);
     res.send(csvRows.join('\n'));
-  });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Get single product
-app.get('/api/products/:id', (req, res) => {
-  db.get('SELECT * FROM products WHERE id = ?', [req.params.id], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+app.get('/api/products/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM products WHERE id = $1', [req.params.id]);
+    const row = result.rows[0];
+
     if (!row) {
       return res.status(404).json({ error: 'Product not found' });
     }
-    res.json(row);
-  });
+  } catch (error) {
+    console.error('Create product error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Create product
-app.post('/api/products', authenticateTokenWithSession, upload.single('image'), (req, res) => {
+app.post('/api/products', authenticateTokenWithSession, upload.single('image'), async (req, res) => {
   // console.log('[POST /api/products] Upload debug:', {
   //   hasFile: !!req.file,
   //   file: req.file ? { filename: req.file.filename, location: req.file.location, mimetype: req.file.mimetype } : null,
@@ -883,158 +869,124 @@ app.post('/api/products', authenticateTokenWithSession, upload.single('image'), 
   // console.log('[POST /api/products] Final image URL:', image);
   const price_value = parsePriceToNumber(price);
 
-  db.run(
-    `INSERT INTO products (name, category, price, price_value, description, image, rating, reviews, status, meta_title, meta_description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [name, category, price, price_value, description, image, rating || 4.0, reviews || 0, status || 'published', meta_title || null, meta_description || null],
-    function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      const newProduct = {
-        id: this.lastID,
-        name,
-        category,
-        price,
-        description,
-        image,
-        rating: rating || 4.0,
-        reviews: reviews || 0,
-        status: status || 'published',
-        price_value,
-        meta_title: meta_title || null,
-        meta_description: meta_description || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
+  try {
+    const result = await pool.query(
+      `INSERT INTO products (name, category, price, price_value, description, image, rating, reviews, status, meta_title, meta_description)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [name, category, price, price_value, description, image, rating || 4.0, reviews || 0, status || 'published', meta_title || null, meta_description || null]
+    );
+    const newProduct = result.rows[0];
 
-        // Broadcast event
-        if (req.app.locals.clients) {
-          const message = `event: product_created\ndata: ${JSON.stringify(newProduct)}\n\n`;
-          req.app.locals.clients.forEach(client => {
-            try { client.write(message); } catch (e) {}
-          });
-        }
+    // Broadcast event
+    if (req.app.locals.clients) {
+      const message = `event: product_created\ndata: ${JSON.stringify(newProduct)}\n\n`;
+      req.app.locals.clients.forEach(client => {
+        try { client.write(message); } catch (e) { }
+      });
+    }
 
-        logActivity(req, 'create', 'product', newProduct.id, null, newProduct);
+    logActivity(req, 'create', 'product', newProduct.id, null, newProduct);
 
-        res.json(newProduct);
-      }
-  );
+    res.status(201).json(newProduct);
+  } catch (error) {
+    console.error('Create product error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Update product
-app.put('/api/products/:id', authenticateTokenWithSession, upload.single('image'), (req, res) => {
+app.put('/api/products/:id', authenticateTokenWithSession, upload.single('image'), async (req, res) => {
   const { name, category, price, description, rating, reviews, status, existing_image, meta_title, meta_description } = req.body;
   const productId = req.params.id;
 
   // First get current product to check for existing image
-  db.get('SELECT * FROM products WHERE id = ?', [productId], (err, product) => {
-    if (err || !product) {
-      return res.status(404).json({ error: 'Product not found' });
-    }
+  const { rows } = await pool.query('SELECT * FROM products WHERE id = $1', [productId]);
+  const product = rows[0];
 
-    const image = getImagePath(req.file, existing_image || product.image);
-    const price_value = parsePriceToNumber(price);
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
 
-    db.run(
-      `UPDATE products
-       SET name = ?, category = ?, price = ?, price_value = ?, description = ?,
-           image = ?, rating = ?, reviews = ?, status = ?, meta_title = ?, meta_description = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [name, category, price, price_value, description, image, rating, reviews, status || product.status || 'published', meta_title || null, meta_description || null, productId],
-      function (err) {
-        if (err) {
-          console.error(`[PUT /api/products/${productId}] UPDATE error:`, err.message);
-          return res.status(500).json({ error: err.message });
-        }
-        const savedStatus = status || product.status || 'published';
-        // console.log(`[PUT /api/products/${productId}] UPDATE successful. Status set to: ${savedStatus}`);
-        const updatedProduct = {
-          id: productId,
-          name,
-          category,
-          price,
-          description,
-          image,
-          rating: parseFloat(rating),
-          reviews: parseInt(reviews),
-          status: savedStatus,
-          price_value,
-          meta_title: meta_title || null,
-          meta_description: meta_description || null,
-          created_at: product.created_at,
-          updated_at: new Date().toISOString()
-        };
+  const image = getImagePath(req.file, existing_image || product.image);
+  const price_value = parsePriceToNumber(price);
 
-        // Broadcast event
-        if (req.app.locals.clients) {
-          const message = `event: product_updated\ndata: ${JSON.stringify(updatedProduct)}\n\n`;
-          req.app.locals.clients.forEach(client => {
-            try { client.write(message); } catch (e) {}
-          });
-        }
+  const result = await pool.query(
+    `UPDATE products
+     SET name = $1, category = $2, price = $3, price_value = $4, description = $5,
+         image = $6, rating = $7, reviews = $8, status = $9, meta_title = $10, meta_description = $11, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $12
+     RETURNING *`,
+    [name, category, price, price_value, description, image, rating, reviews, status || product.status || 'published', meta_title || null, meta_description || null, productId]
+  );
 
-        logActivity(req, 'update', 'product', parseInt(productId), product, updatedProduct);
+  const savedStatus = status || product.status || 'published';
+  // console.log(`[PUT /api/products/${productId}] UPDATE successful. Status set to: ${savedStatus}`);
+  const updatedProduct = result.rows[0];
 
-        res.json(updatedProduct);
-      }
-    );
-  });
+  // Broadcast event
+  if (req.app.locals.clients) {
+    const message = `event: product_updated\ndata: ${JSON.stringify(updatedProduct)}\n\n`;
+    req.app.locals.clients.forEach(client => {
+      try { client.write(message); } catch (e) { }
+    });
+  }
+
+  logActivity(req, 'update', 'product', parseInt(productId), product, updatedProduct);
+
+  res.json(updatedProduct);
 });
 
 // Delete product
-app.delete('/api/products/:id', authenticateTokenWithSession, (req, res) => {
+app.delete('/api/products/:id', authenticateTokenWithSession, async (req, res) => {
   const productId = req.params.id;
 
   // Get product to delete image file
-  db.get('SELECT * FROM products WHERE id = ?', [productId], (err, product) => {
-    if (err || !product) {
-      return res.status(404).json({ error: 'Product not found' });
+  const { rows } = await pool.query('SELECT * FROM products WHERE id = $1', [productId]);
+  const product = rows[0];
+
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+
+  // Delete image file if exists
+  if (product.image) {
+    const imagePath = path.join(__dirname, product.image);
+    if (fs.existsSync(imagePath)) {
+      fs.unlinkSync(imagePath);
     }
+  }
 
-    // Delete image file if exists
-    if (product.image) {
-      const imagePath = path.join(__dirname, product.image);
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
-      }
-    }
+  await pool.query('DELETE FROM products WHERE id = $1', [productId]);
 
-    db.run('DELETE FROM products WHERE id = ?', [productId], function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-
-      // Broadcast event
-      if (req.app.locals.clients) {
-        const message = `event: product_deleted\ndata: ${JSON.stringify({ id: productId })}\n\n`;
-        req.app.locals.clients.forEach(client => {
-          try { client.write(message); } catch (e) {}
-        });
-      }
-
-      logActivity(req, 'delete', 'product', parseInt(productId), product, null);
-
-      res.json({ message: 'Product deleted successfully' });
+  // Broadcast event
+  if (req.app.locals.clients) {
+    const message = `event: product_deleted\ndata: ${JSON.stringify({ id: productId })}\n\n`;
+    req.app.locals.clients.forEach(client => {
+      try { client.write(message); } catch (e) { }
     });
-  });
+  }
+
+  logActivity(req, 'delete', 'product', parseInt(productId), product, null);
+
+  res.json({ message: 'Product deleted successfully' });
 });
 
 // ==================== ADVANCED PRODUCT OPERATIONS ====================
 
 // Bulk delete products
-app.post('/api/products/bulk-delete', authenticateTokenWithSession, (req, res) => {
+app.post('/api/products/bulk-delete', authenticateTokenWithSession, async (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: 'ids array is required' });
   }
 
-  // Get products to delete images
-  db.all('SELECT * FROM products WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids, (err, products) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    // Get products to delete images
+    const placeholders = ids.map((_, index) => `$${index + 1}`).join(',');
+    const { rows: products } = await pool.query(
+      `SELECT * FROM products WHERE id IN (${placeholders})`,
+      ids
+    );
 
     // Delete image files
     products.forEach(product => {
@@ -1046,24 +998,25 @@ app.post('/api/products/bulk-delete', authenticateTokenWithSession, (req, res) =
       }
     });
 
-    db.run('DELETE FROM products WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids, function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
+    await pool.query(
+      `DELETE FROM products WHERE id IN (${placeholders})`,
+      ids
+    );
 
-      const deletedCount = this.affectedRows;
-      products.forEach(p => logActivity(req, 'delete', 'product', p.id, p, null));
+    const deletedCount = products.length;
+    products.forEach(p => logActivity(req, 'delete', 'product', p.id, p, null));
 
-      res.json({
-        message: `${deletedCount} product(s) deleted successfully`,
-        deletedCount
-      });
+    res.json({
+      message: `${deletedCount} product(s) deleted successfully`,
+      deletedCount
     });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Bulk update products
-app.post('/api/products/bulk-update', authenticateTokenWithSession, (req, res) => {
+app.post('/api/products/bulk-update', authenticateTokenWithSession, async (req, res) => {
   const { ids, updates } = req.body;
   if (!Array.isArray(ids) || ids.length === 0 || !updates) {
     return res.status(400).json({ error: 'ids array and updates object are required' });
@@ -1072,23 +1025,28 @@ app.post('/api/products/bulk-update', authenticateTokenWithSession, (req, res) =
   // Build SET clause dynamically
   const setClause = [];
   const values = [];
+  let paramIndex = 1;
 
   if (updates.status) {
-    setClause.push('status = ?');
+    setClause.push(`status = $${paramIndex}`);
     values.push(updates.status);
+    paramIndex++;
   }
   if (updates.category) {
-    setClause.push('category = ?');
+    setClause.push(`category = $${paramIndex}`);
     values.push(updates.category);
+    paramIndex++;
   }
   if (updates.price) {
-    setClause.push('price = ?');
+    setClause.push(`price = $${paramIndex}`);
     values.push(updates.price);
+    paramIndex++;
     // Also update price_value if we have a price update
     const priceValue = parsePriceToNumber(updates.price);
     if (priceValue !== null) {
-      setClause.push('price_value = ?');
+      setClause.push(`price_value = $${paramIndex}`);
       values.push(priceValue);
+      paramIndex++;
     }
   }
   // Add other updateable fields as needed
@@ -1098,42 +1056,45 @@ app.post('/api/products/bulk-update', authenticateTokenWithSession, (req, res) =
   }
 
   // Fetch old products for logging
-  db.all('SELECT * FROM products WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids, (err, oldProducts) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    const placeholders = ids.map((_, index) => `$${index + 1}`).join(',');
+    const { rows: oldProducts } = await pool.query(
+      `SELECT * FROM products WHERE id IN (${placeholders})`,
+      ids
+    );
 
     setClause.push('updated_at = CURRENT_TIMESTAMP');
     values.push(...ids);
 
-    const sql = `UPDATE products SET ${setClause.join(', ')} WHERE id IN (${ids.map(() => '?').join(',')})`;
-    db.run(sql, values, function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
+    const sql = `UPDATE products SET ${setClause.join(', ')} WHERE id IN (${placeholders})`;
+    await pool.query(sql, values);
 
-      // Fetch updated products and log
-      db.all('SELECT * FROM products WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids, (err, updatedProducts) => {
-        if (!err && updatedProducts) {
-          oldProducts.forEach(old => {
-            const updated = updatedProducts.find(p => p.id === old.id);
-            if (updated) {
-              logActivity(req, 'update', 'product', old.id, old, updated);
-            }
-          });
+    // Fetch updated products and log
+    const { rows: updatedProducts } = await pool.query(
+      `SELECT * FROM products WHERE id IN (${placeholders})`,
+      ids
+    );
+
+    if (updatedProducts) {
+      oldProducts.forEach(old => {
+        const updated = updatedProducts.find(p => p.id === old.id);
+        if (updated) {
+          logActivity(req, 'update', 'product', old.id, old, updated);
         }
       });
+    }
 
-      res.json({
-        message: `${this.affectedRows} product(s) updated successfully`,
-        updatedCount: this.affectedRows
-      });
+    res.json({
+      message: `${values.length / (setClause.length)} product(s) updated successfully`,
+      updatedCount: values.length / (setClause.length)
     });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Bulk price adjustment (percentage or fixed)
-app.post('/api/products/bulk-price-adjust', authenticateTokenWithSession, (req, res) => {
+app.post('/api/products/bulk-price-adjust', authenticateTokenWithSession, async (req, res) => {
   const { ids, adjustment } = req.body;
   if (!Array.isArray(ids) || ids.length === 0 || !adjustment) {
     return res.status(400).json({ error: 'ids array and adjustment object are required' });
@@ -1148,10 +1109,12 @@ app.post('/api/products/bulk-price-adjust', authenticateTokenWithSession, (req, 
   }
 
   // Fetch all selected products
-  db.all('SELECT * FROM products WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids, async (err, products) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    const placeholders = ids.map((_, index) => `$${index + 1}`).join(',');
+    const { rows: products } = await pool.query(
+      `SELECT * FROM products WHERE id IN (${placeholders})`,
+      ids
+    );
 
     const updates = [];
     for (const product of products) {
@@ -1183,82 +1146,60 @@ app.post('/api/products/bulk-price-adjust', authenticateTokenWithSession, (req, 
     }
 
     // Perform updates in a transaction
-    db.serialize(() => {
-      db.run('BEGIN TRANSACTION');
-      const stmt = db.prepare('UPDATE products SET price = ?, price_value = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-      let errorOccurred = false;
+    await pool.query('BEGIN');
+    try {
       for (const u of updates) {
-        stmt.run(u.price, u.price_value, u.id, (err) => {
-          if (err) {
-            errorOccurred = true;
-            console.error(`Bulk price adjust error for product ${u.id}:`, err.message);
-          }
-        });
+        await pool.query(
+          'UPDATE products SET price = $1, price_value = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+          [u.price, u.price_value, u.id]
+        );
       }
-      stmt.finalize();
-      if (errorOccurred) {
-        db.run('ROLLBACK');
-        return res.status(500).json({ error: 'One or more updates failed' });
-      } else {
-        db.run('COMMIT');
+      await pool.query('COMMIT');
 
-        products.forEach(oldProduct => {
-          const updated = updates.find(u => u.id === oldProduct.id);
-          if (updated) {
-            logActivity(req, 'update', 'product', oldProduct.id, oldProduct, updated);
-          }
-        });
+      products.forEach(oldProduct => {
+        const updated = updates.find(u => u.id === oldProduct.id);
+        if (updated) {
+          logActivity(req, 'update', 'product', oldProduct.id, oldProduct, updated);
+        }
+      });
 
-        res.json({
-          message: `${updates.length} product(s) price adjusted successfully`,
-          adjustedCount: updates.length
-        });
-      }
-    });
-  });
+      res.json({
+        message: `${updates.length} product(s) price adjusted successfully`,
+        adjustedCount: updates.length
+      });
+    } catch (err) {
+      await pool.query('ROLLBACK');
+      throw err;
+    }
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Duplicate product
-app.post('/api/products/:id/duplicate', authenticateTokenWithSession, (req, res) => {
+app.post('/api/products/:id/duplicate', authenticateTokenWithSession, async (req, res) => {
   const productId = req.params.id;
 
-  db.get('SELECT * FROM products WHERE id = ?', [productId], (err, product) => {
-    if (err || !product) {
-      return res.status(404).json({ error: 'Product not found' });
-    }
+  const { rows } = await pool.query('SELECT * FROM products WHERE id = $1', [productId]);
+  const product = rows[0];
 
-    // Insert duplicate with new name
-    const newName = `${product.name} (Copy)`;
-    const price_value = parsePriceToNumber(product.price);
-    db.run(
-      `INSERT INTO products (name, category, price, price_value, description, image, rating, reviews, status, meta_title, meta_description, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [newName, product.category, product.price, price_value, product.description, product.image, product.rating, product.reviews, 'draft', product.meta_title || null, product.meta_description || null, new Date().toISOString(), new Date().toISOString()],
-      function (err) {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        const newProduct = {
-          id: this.lastID,
-          name: newName,
-          category: product.category,
-          price: product.price,
-          description: product.description,
-          image: product.image,
-          rating: product.rating,
-          reviews: product.reviews,
-          status: 'draft',
-          price_value,
-          meta_title: product.meta_title || null,
-          meta_description: product.meta_description || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        logActivity(req, 'create', 'product', newProduct.id, null, newProduct);
-        res.json(newProduct);
-      }
-    );
-  });
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+
+  // Insert duplicate with new name
+  const newName = `${product.name} (Copy)`;
+  const price_value = parsePriceToNumber(product.price);
+
+  const result = await pool.query(
+    `INSERT INTO products (name, category, price, price_value, description, image, rating, reviews, status, meta_title, meta_description, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+    [newName, product.category, product.price, price_value, product.description, product.image, product.rating, product.reviews, 'draft', product.meta_title || null, product.meta_description || null, new Date().toISOString(), new Date().toISOString()]
+  );
+
+  const newProduct = result.rows[0];
+  logActivity(req, 'create', 'product', newProduct.id, null, newProduct);
+  res.json(newProduct);
 });
 
 // Import products from CSV
@@ -1333,29 +1274,27 @@ app.post('/api/products/import', authenticateTokenWithSession, uploadCSV.single(
       }
 
       // Insert into database
-      db.run(
-        `INSERT INTO products (name, category, price, description, image, rating, reviews, status, price_value, meta_title, meta_description, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-        [name, category, priceStr, description, image, rating, reviews, status, price_value, meta_title, meta_description],
-        function(err) {
-          if (err) {
-            results.errors.push({ row: i, error: err.message });
-          } else {
-            results.imported++;
-          }
+      try {
+        await pool.query(
+          `INSERT INTO products (name, category, price, description, image, rating, reviews, status, price_value, meta_title, meta_description, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+          [name, category, priceStr, description, image, rating, reviews, status, price_value, meta_title, meta_description]
+        );
+        results.imported++;
+      } catch (err) {
+        results.errors.push({ row: i, error: err.message });
+      }
 
-          // Check if this was the last row
-          if (i === rows.length - 1) {
-            const success = results.imported > 0;
-            const message = `Import completed: ${results.imported}/${results.total} products imported successfully`;
-            res.status(success ? 200 : 207).json({
-              success,
-              message,
-              results,
-            });
-          }
-        }
-      );
+      // Check if this was the last row
+      if (i === rows.length - 1) {
+        const success = results.imported > 0;
+        const message = `Import completed: ${results.imported}/${results.total} products imported successfully`;
+        res.status(success ? 200 : 207).json({
+          success,
+          message,
+          results,
+        });
+      }
     }
 
     // Handle case where all rows were empty
@@ -1363,15 +1302,18 @@ app.post('/api/products/import', authenticateTokenWithSession, uploadCSV.single(
       res.status(400).json({ error: 'No valid data rows found' });
     }
   } catch (error) {
-    console.error('Import error:', error);
-    res.status(500).json({ error: 'Failed to process CSV file', details: error.message });
+    console.error('Get product error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // Get product preview
-app.get('/api/products/:id/preview', (req, res) => {
-  db.get('SELECT * FROM products WHERE id = ?', [req.params.id], (err, product) => {
-    if (err || !product) {
+app.get('/api/products/:id/preview', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM products WHERE id = $1', [req.params.id]);
+    const product = result.rows[0];
+
+    if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
     res.json({
@@ -1385,53 +1327,53 @@ app.get('/api/products/:id/preview', (req, res) => {
         </div>
       `
     });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== DASHBOARD API ====================
 
 // Get dashboard statistics with month-over-month comparisons
-app.get('/api/dashboard/stats', authenticateTokenWithSession, (req, res) => {
-  // Calculate date ranges for current and previous month
-  const now = new Date();
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+app.get('/api/dashboard/stats', authenticateTokenWithSession, async (req, res) => {
+  try {
+    // Calculate date ranges for current and previous month
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
-  // Helper to format date for SQLite
-  const formatDate = (date) => date.toISOString();
+    // Helper to format date for PostgreSQL
+    const formatDate = (date) => date.toISOString();
 
-  // Query all stats in parallel
-  const statsQuery = `
-    SELECT
-      -- Current totals (all time)
-      COUNT(*) as currentTotalProducts,
-      -- Previous total (products that existed at start of current month)
-      COUNT(CASE WHEN created_at < ? THEN 1 END) as previousTotalProducts,
-      -- Categories
-      (SELECT COUNT(*) FROM categories) as currentTotalCategories,
-      (SELECT COUNT(*) FROM categories WHERE created_at < ?) as previousTotalCategories,
-      -- Average rating (all products vs products existing at start of month)
-      AVG(rating) as currentAvgRating,
-      AVG(CASE WHEN created_at < ? THEN rating END) as previousAvgRating,
-      -- Total reviews
-      SUM(reviews) as currentTotalReviews,
-      SUM(CASE WHEN created_at < ? THEN reviews END) as previousTotalReviews
-    FROM products
-  `;
+    // Query all stats in parallel
+    const statsQuery = `
+      SELECT
+        -- Current totals (all time)
+        COUNT(*) as currentTotalProducts,
+        -- Previous total (products that existed at start of current month)
+        COUNT(CASE WHEN created_at < $1 THEN 1 END) as previousTotalProducts,
+        -- Categories
+        (SELECT COUNT(*) FROM categories) as currentTotalCategories,
+        (SELECT COUNT(*) FROM categories WHERE created_at < $2) as previousTotalCategories,
+        -- Average rating (all products vs products existing at start of month)
+        AVG(rating) as currentAvgRating,
+        AVG(CASE WHEN created_at < $3 THEN rating END) as previousAvgRating,
+        -- Total reviews
+        SUM(reviews) as currentTotalReviews,
+        SUM(CASE WHEN created_at < $4 THEN reviews END) as previousTotalReviews
+      FROM products
+    `;
 
-  const params = [
-    formatDate(currentMonthStart), // for previousTotalProducts
-    formatDate(currentMonthStart), // for previousTotalCategories
-    formatDate(currentMonthStart), // for previousAvgRating
-    formatDate(currentMonthStart)  // for previousTotalReviews
-  ];
+    const params = [
+      formatDate(currentMonthStart), // for previousTotalProducts
+      formatDate(currentMonthStart), // for previousTotalCategories
+      formatDate(currentMonthStart), // for previousAvgRating
+      formatDate(currentMonthStart)  // for previousTotalReviews
+    ];
 
-  db.all(statsQuery, params, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    const data = rows[0];
+    const result = await pool.query(statsQuery, params);
+    const data = result.rows[0];
 
     // Calculate changes
     const previousTotalProducts = data.previousTotalProducts || 1; // avoid divide by zero
@@ -1460,140 +1402,128 @@ app.get('/api/dashboard/stats', authenticateTokenWithSession, (req, res) => {
     };
 
     // Get recent products
-    db.all('SELECT * FROM products ORDER BY created_at DESC LIMIT 5', (err, recentProducts) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
+    const recentResult = await pool.query('SELECT * FROM products ORDER BY created_at DESC LIMIT 5');
+    const recentProducts = recentResult.rows;
 
-      // Get products by category
-      db.all(`
-        SELECT category, COUNT(*) as count
-        FROM products
-        GROUP BY category
-        ORDER BY count DESC
-      `, (err, categoryData) => {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
+    // Get products by category
+    const categoryResult = await pool.query(`
+      SELECT category, COUNT(*) as count
+      FROM products
+      GROUP BY category
+      ORDER BY count DESC
+    `);
+    const categoryData = categoryResult.rows;
 
-        // Transform to match frontend expected format: { name, count }
-        const formattedCategoryData = categoryData.map(item => ({
-          name: item.category,
-          count: item.count
-        }));
+    // Transform to match frontend expected format: { name, count }
+    const formattedCategoryData = categoryData.map(item => ({
+      name: item.category,
+      count: item.count
+    }));
 
-        res.json({
-          ...stats,
-          recentProducts,
-          categoryData: formattedCategoryData
-        });
-      });
+    res.json({
+      ...stats,
+      recentProducts,
+      categoryData: formattedCategoryData
     });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== CATEGORIES API ====================
 
 // Get all categories with product counts
-app.get('/api/categories', (req, res) => {
-  const { active } = req.query;
-  let query = `
-    SELECT
-      c.*,
-      COUNT(p.id) as product_count
-    FROM categories c
-    LEFT JOIN products p ON c.name = p.category
-  `;
-  const params = [];
-  
-  if (active === 'true') {
-    query += ' WHERE c.is_active = 1';
-  }
-  
-  query += ' GROUP BY c.id ORDER BY c.sort_order ASC, c.name ASC';
-  
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
+app.get('/api/categories', async (req, res) => {
+  try {
+    const { active } = req.query;
+    let query = `
+      SELECT
+        c.*,
+        COUNT(p.id) as product_count
+      FROM categories c
+      LEFT JOIN products p ON c.name = p.category
+    `;
+    const params = [];
+
+    if (active === 'true') {
+      query += ' WHERE c.is_active = true';
     }
-    res.json(rows);
-  });
+
+    query += ' GROUP BY c.id ORDER BY c.sort_order ASC, c.name ASC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Get single category with product count
-app.get('/api/categories/:id', (req, res) => {
-  db.all(`
-    SELECT
-      c.*,
-      COUNT(p.id) as product_count
-    FROM categories c
-    LEFT JOIN products p ON c.name = p.category
-    WHERE c.id = ?
-    GROUP BY c.id
-  `, [req.params.id], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    const row = rows[0];
-    if (!row) {
+app.get('/api/categories/:id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        c.*,
+        COUNT(p.id) as product_count
+      FROM categories c
+      LEFT JOIN products p ON c.name = p.category
+      WHERE c.id = $1
+      GROUP BY c.id
+    `, [req.params.id]);
+
+    const rows = result.rows;
+    if (rows.length === 0) {
       return res.status(404).json({ error: 'Category not found' });
     }
-    res.json(row);
-  });
+    res.json(rows[0]);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Create category
-app.post('/api/categories', authenticateTokenWithSession, (req, res) => {
+app.post('/api/categories', authenticateTokenWithSession, async (req, res) => {
   const { name, slug, description, subtitle, icon, color, sort_order, is_active } = req.body;
 
   if (!name || !slug) {
     return res.status(400).json({ error: 'Name and slug are required' });
   }
 
-  db.run(
-    `INSERT INTO categories (name, slug, description, subtitle, icon, color, sort_order, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [name, slug, description || null, subtitle || null, icon || null, color || '#D4AF37', sort_order || 0, is_active !== undefined ? is_active : 1],
-    function (err) {
-      if (err) {
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ error: 'Category with this name or slug already exists' });
-        }
-        return res.status(500).json({ error: err.message });
-      }
-      const newCategory = {
-        id: this.lastID,
-        name,
-        slug,
-        description: description || null,
-        subtitle: subtitle || null,
-        icon: icon || null,
-        color: color || '#D4AF37',
-        sort_order: sort_order || 0,
-        is_active: is_active !== undefined ? is_active : 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      logActivity(req, 'create', 'category', newCategory.id, null, newCategory);
-      res.json(newCategory);
+  try {
+    const result = await pool.query(
+      `INSERT INTO categories (name, slug, description, subtitle, icon, color, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [name, slug, description || null, subtitle || null, icon || null, color || '#D4AF37', sort_order || 0, is_active !== undefined ? is_active : 1]
+    );
+    const newCategory = result.rows[0];
+    logActivity(req, 'create', 'category', newCategory.id, null, newCategory);
+    res.json(newCategory);
+  } catch (err) {
+    if (err.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'Category with this name or slug already exists' });
     }
-  );
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Update category
-app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
+app.put('/api/categories/:id', authenticateTokenWithSession, async (req, res) => {
   const { name, slug, description, subtitle, icon, color, sort_order, is_active } = req.body;
   const categoryId = req.params.id;
 
-  db.get('SELECT * FROM categories WHERE id = ?', [categoryId], (err, category) => {
-    if (err || !category) {
-      return res.status(404).json({ error: 'Category not found' });
-    }
+  const { rows } = await pool.query('SELECT * FROM categories WHERE id = $1', [categoryId]);
+  const category = rows[0];
 
-    db.run(
+  if (!category) {
+    return res.status(404).json({ error: 'Category not found' });
+  }
+
+  try {
+    const result = await pool.query(
       `UPDATE categories
-       SET name = ?, slug = ?, description = ?, subtitle = ?, icon = ?, color = ?, sort_order = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+        SET name = $1, slug = $2, description = $3, subtitle = $4, icon = $5, color = $6, sort_order = $7, is_active = $8, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $9
+        RETURNING *`,
       [
         name || category.name,
         slug || category.slug,
@@ -1604,221 +1534,192 @@ app.put('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
         sort_order !== undefined ? sort_order : category.sort_order,
         is_active !== undefined ? is_active : category.is_active,
         categoryId
-      ],
-      function (err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ error: 'Category with this name or slug already exists' });
-          }
-          return res.status(500).json({ error: err.message });
-        }
-        const updatedCategory = {
-          id: parseInt(categoryId),
-          name: name || category.name,
-          slug: slug || category.slug,
-          description: description !== undefined ? description : category.description,
-          subtitle: subtitle !== undefined ? subtitle : category.subtitle,
-          icon: icon !== undefined ? icon : category.icon,
-          color: color || category.color,
-          sort_order: sort_order !== undefined ? sort_order : category.sort_order,
-          is_active: is_active !== undefined ? is_active : category.is_active,
-          created_at: category.created_at,
-          updated_at: new Date().toISOString()
-        };
-        logActivity(req, 'update', 'category', parseInt(categoryId), category, updatedCategory);
-        res.json(updatedCategory);
-      }
+      ]
     );
-  });
+    const updatedCategory = result.rows[0];
+    logActivity(req, 'update', 'category', parseInt(categoryId), category, updatedCategory);
+    res.json(updatedCategory);
+  } catch (err) {
+    if (err.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'Category with this name or slug already exists' });
+    }
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Delete category
-app.delete('/api/categories/:id', authenticateTokenWithSession, (req, res) => {
+app.delete('/api/categories/:id', authenticateTokenWithSession, async (req, res) => {
   const categoryId = req.params.id;
 
-  // Get category data before deleting for logging
-  db.get('SELECT * FROM categories WHERE id = ?', [categoryId], (err, category) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    // Get category data before deleting for logging
+    const { rows } = await pool.query('SELECT * FROM categories WHERE id = $1', [categoryId]);
+    const category = rows[0];
+
     if (!category) {
       return res.status(404).json({ error: 'Category not found' });
     }
 
     // Check if category has products
-    db.get('SELECT COUNT(*) as count FROM products WHERE category = ?', [category.name], (err, row) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      if (row && row.count > 0) {
-        return res.status(400).json({ error: `Cannot delete category with ${row.count} product(s). Reassign products first.` });
-      }
+    const { rows: countRows } = await pool.query('SELECT COUNT(*) as count FROM products WHERE category = $1', [category.name]);
+    const countResult = countRows[0];
 
-      db.run('DELETE FROM categories WHERE id = ?', [categoryId], function (err) {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        logActivity(req, 'delete', 'category', parseInt(categoryId), category, null);
-        res.json({ message: 'Category deleted successfully' });
-      });
-    });
-  });
+    if (countResult.count > 0) {
+      return res.status(400).json({ error: `Cannot delete category with ${countResult.count} product(s). Reassign products first.` });
+    }
+
+    await pool.query('DELETE FROM categories WHERE id = $1', [categoryId]);
+    logActivity(req, 'delete', 'category', parseInt(categoryId), category, null);
+    res.json({ message: 'Category deleted successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Reorder categories
-app.post('/api/categories/reorder', authenticateTokenWithSession, (req, res) => {
+app.post('/api/categories/reorder', authenticateTokenWithSession, async (req, res) => {
   const { categoryOrders } = req.body; // Array of { id, sort_order }
 
   if (!Array.isArray(categoryOrders)) {
     return res.status(400).json({ error: 'categoryOrders array is required' });
   }
 
-  db.serialize(() => {
+  try {
     let completed = 0;
     const errors = [];
 
-    categoryOrders.forEach((order, index) => {
-      db.run(
-        'UPDATE categories SET sort_order = ? WHERE id = ?',
-        [order.sort_order || index, order.id],
-        function (err) {
-          if (err) {
-            errors.push(`Category ${order.id}: ${err.message}`);
-          }
-          completed++;
-          if (completed === categoryOrders.length) {
-            if (errors.length > 0) {
-              return res.status(500).json({ error: errors.join(', ') });
-            }
-            res.json({ message: 'Categories reordered successfully' });
-          }
-        }
+    for (const order of categoryOrders) {
+      await pool.query(
+        'UPDATE categories SET sort_order = $1 WHERE id = $2',
+        [order.sort_order || completed, order.id]
       );
-    });
-  });
+      completed++;
+    }
+
+    if (errors.length > 0) {
+      return res.status(500).json({ error: errors.join(', ') });
+    }
+    res.json({ message: 'Categories reordered successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== SETTINGS API ====================
 
 // Public endpoint - Get all settings (no auth required for public frontend)
-app.get('/api/site', (req, res) => {
-  db.all('SELECT key, value FROM settings', [], (err, rows) => {
-    if (err) {
-      console.error('Error fetching settings:', err.message);
-      return res.status(500).json({ error: 'Failed to fetch settings' });
-    }
+app.get('/api/site', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT key, value FROM settings');
     const settings = {};
-    rows.forEach(row => {
+    result.rows.forEach(row => {
       settings[row.key] = row.value;
     });
     res.json(settings);
-  });
+  } catch (err) {
+    console.error('Error fetching settings:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch settings' });
+  }
 });
 
 // Get all settings as key-value object (admin only)
-app.get('/api/settings', authenticateTokenWithSession, (req, res) => {
-  db.all('SELECT key, value FROM settings', [], (err, rows) => {
-    if (err) {
-      console.error('Error fetching settings:', err.message);
-      return res.status(500).json({ error: 'Failed to fetch settings' });
-    }
+app.get('/api/settings', authenticateTokenWithSession, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT key, value FROM settings');
     const settings = {};
-    rows.forEach(row => {
+    result.rows.forEach(row => {
       settings[row.key] = row.value;
     });
     res.json(settings);
-  });
+  } catch (err) {
+    console.error('Error fetching settings:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch settings' });
+  }
 });
 
 // Update settings (bulk)
-app.put('/api/settings', authenticateTokenWithSession, (req, res) => {
+app.put('/api/settings', authenticateTokenWithSession, async (req, res) => {
   const updates = req.body; // Expecting { key: value, ... }
 
   if (!updates || typeof updates !== 'object') {
     return res.status(400).json({ error: 'Settings object is required' });
   }
 
-  // Get old settings for logging
-  db.all('SELECT key, value FROM settings', [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-
+  try {
+    // Get old settings for logging
+    const { rows } = await pool.query('SELECT key, value FROM settings');
     const oldSettings = {};
     rows.forEach(row => {
       oldSettings[row.key] = row.value;
     });
 
-    db.serialize(() => {
-      let completed = 0;
-      const errors = [];
-      const keys = Object.keys(updates);
+    let completed = 0;
+    const errors = [];
+    const keys = Object.keys(updates);
 
-      if (keys.length === 0) {
-        return res.status(400).json({ error: 'No settings to update' });
-      }
+    if (keys.length === 0) {
+      return res.status(400).json({ error: 'No settings to update' });
+    }
 
-      keys.forEach(key => {
-        const value = String(updates[key]);
-        db.run(
-          'INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-          [key, value],
-          function (err) {
-            if (err) {
-              errors.push(`${key}: ${err.message}`);
-            }
-            completed++;
-            if (completed === keys.length) {
-              if (errors.length > 0) {
-                return res.status(500).json({ error: errors.join(', ') });
-              }
-
-              // Log each changed setting
-              keys.forEach(key => {
-                if (oldSettings[key] !== updates[key]) {
-                  logActivity(req, 'update', 'setting', null, { [key]: oldSettings[key] }, { [key]: updates[key] });
-                }
-              });
-
-              res.json({ message: 'Settings updated successfully' });
-            }
-          }
+    for (const key of keys) {
+      const value = String(updates[key]);
+      try {
+        await pool.query(
+          'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP',
+          [key, value]
         );
-      });
-    });
-  });
+        completed++;
+      } catch (err) {
+        errors.push(`${key}: ${err.message}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.status(500).json({ error: errors.join(', ') });
+    }
+
+    // Log each changed setting
+    for (const key of keys) {
+      if (oldSettings[key] !== updates[key]) {
+        logActivity(req, 'update', 'setting', null, { [key]: oldSettings[key] }, { [key]: updates[key] });
+      }
+    }
+
+    res.json({ message: 'Settings updated successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== SETTINGS API - SYSTEM ====================
 
 // Upload logo or favicon
-app.post('/api/settings/upload-logo', authenticateTokenWithSession, upload.single('file'), (req, res) => {
+app.post('/api/settings/upload-logo', authenticateTokenWithSession, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
-  
+
   const type = req.body.type || 'logo';
   const image = getImagePath(req.file);
-  
+
   // Update settings with the file path
-  db.run(
-    'INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-    [type, image],
-    function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      logActivity(req, 'update', 'setting', null, null, { [type]: image });
-      res.json({ [type]: image, message: `${type} uploaded successfully` });
-    }
-  );
+  try {
+    await pool.query(
+      'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP',
+      [type, image]
+    );
+    logActivity(req, 'update', 'setting', null, null, { [type]: image });
+    res.json({ [type]: image, message: `${type} uploaded successfully` });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Get system status info
-app.get('/api/settings/system-status', authenticateTokenWithSession, (req, res) => {
+app.get('/api/settings/system-status', authenticateTokenWithSession, async (req, res) => {
   const dbPath = path.join(__dirname, 'luxe_looks.db');
   const uploadsDir = path.join(__dirname, 'uploads');
-  
+
   // Get database file size
   let dbSize = 0;
   try {
@@ -1846,54 +1747,42 @@ app.get('/api/settings/system-status', authenticateTokenWithSession, (req, res) 
   }
 
   // Get active session count
-  db.get(
-    'SELECT COUNT(*) as count FROM sessions WHERE expires_at > datetime("now")',
-    [],
-    (err, sessionResult) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
+  try {
+    const sessionResult = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE expires_at > NOW()');
 
-      // Get server start time (approximate)
-      const uptime = process.uptime();
-      const uptimeDays = Math.floor(uptime / 86400);
-      const uptimeHours = Math.floor((uptime % 86400) / 3600);
-      const uptimeMinutes = Math.floor((uptime % 3600) / 60);
+    // Get server start time (approximate)
+    const uptime = process.uptime();
+    const uptimeDays = Math.floor(uptime / 86400);
+    const uptimeHours = Math.floor((uptime % 86400) / 3600);
+    const uptimeMinutes = Math.floor((uptime % 3600) / 60);
 
-      // Get SQLite version
-      db.get('SELECT sqlite_version() as version', [], (err, versionResult) => {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
+    // Get PostgreSQL version
+    const versionResult = await pool.query('SELECT version()');
 
-        // Get product count
-        db.get('SELECT COUNT(*) as count FROM products', [], (err, productResult) => {
-          if (err) {
-            return res.status(500).json({ error: err.message });
-          }
+    // Get product count
+    const productResult = await pool.query('SELECT COUNT(*) as count FROM products');
 
-          res.json({
-            database_size: dbSize,
-            database_size_formatted: formatBytes(dbSize),
-            uploads_size: uploadsSize,
-            uploads_size_formatted: formatBytes(uploadsSize),
-            active_sessions: sessionResult.count,
-            uptime_seconds: Math.floor(uptime),
-            uptime_formatted: `${uptimeDays}d ${uptimeHours}h ${uptimeMinutes}m`,
-            sqlite_version: versionResult.version,
-            node_version: process.version,
-            product_count: productResult.count
-          });
-        });
-      });
-    }
-  );
+    res.json({
+      database_size: dbSize,
+      database_size_formatted: formatBytes(dbSize),
+      uploads_size: uploadsSize,
+      uploads_size_formatted: formatBytes(uploadsSize),
+      active_sessions: sessionResult.rows[0].count,
+      uptime_seconds: Math.floor(uptime),
+      uptime_formatted: `${uptimeDays}d ${uptimeHours}h ${uptimeMinutes}m`,
+      sqlite_version: versionResult.rows[0].version, // Note: This will be PostgreSQL version, not SQLite
+      node_version: process.version,
+      product_count: productResult.rows[0].count
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Download database backup
 app.get('/api/settings/backup', authenticateTokenWithSession, (req, res) => {
   const dbPath = path.join(__dirname, 'luxe_looks.db');
-  
+
   if (!fs.existsSync(dbPath)) {
     return res.status(404).json({ error: 'Database file not found' });
   }
@@ -1917,7 +1806,7 @@ app.post('/api/settings/restore', authenticateTokenWithSession, uploadCSV.single
 
   const dbPath = path.join(__dirname, 'luxe_looks.db');
   const backupPath = path.join(__dirname, 'luxe_looks.db.backup');
-  
+
   try {
     // Create backup of current database first
     if (fs.existsSync(dbPath)) {
@@ -1936,7 +1825,7 @@ app.post('/api/settings/restore', authenticateTokenWithSession, uploadCSV.single
     res.json({ message: 'Database restored successfully. Please restart the server.' });
   } catch (error) {
     console.error('Restore error:', error);
-    
+
     // Try to restore from backup
     try {
       if (fs.existsSync(backupPath)) {
@@ -1953,7 +1842,7 @@ app.post('/api/settings/restore', authenticateTokenWithSession, uploadCSV.single
 // ==================== ACTIVITY LOGS API ====================
 
 // Get activity logs with filtering and pagination
-app.get('/api/activity-logs', authenticateTokenWithSession, (req, res) => {
+app.get('/api/activity-logs', authenticateTokenWithSession, async (req, res) => {
   const {
     user_id,
     action,
@@ -1970,74 +1859,92 @@ app.get('/api/activity-logs', authenticateTokenWithSession, (req, res) => {
   const conditions = [];
   const params = [];
 
+  let paramIndex = 1;
   if (user_id) {
-    conditions.push('al.user_id = ?');
+    conditions.push(`al.user_id = $${paramIndex}`);
     params.push(parseInt(user_id));
+    paramIndex++;
   }
   if (action) {
-    conditions.push('al.action = ?');
+    conditions.push(`al.action = $${paramIndex}`);
     params.push(action);
+    paramIndex++;
   }
   if (entity_type) {
-    conditions.push('al.entity_type = ?');
+    conditions.push(`al.entity_type = $${paramIndex}`);
     params.push(entity_type);
+    paramIndex++;
   }
   if (dateFrom) {
-    conditions.push('al.created_at >= ?');
+    conditions.push(`al.created_at >= $${paramIndex}`);
     params.push(dateFrom);
+    paramIndex++;
   }
   if (dateTo) {
-    conditions.push('al.created_at <= ?');
+    conditions.push(`al.created_at <= $${paramIndex}`);
     params.push(dateTo);
+    paramIndex++;
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   // Get total count
-  const countQuery = `SELECT COUNT(*) as total FROM activity_logs al ${whereClause}`;
-  db.get(countQuery, params, (err, countResult) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    const total = countResult.total;
-
-    // Get paginated logs with user info
-    const dataQuery = `
-      SELECT
-        al.*,
-        u.username
-      FROM activity_logs al
-      LEFT JOIN users u ON al.user_id = u.id
-      ${whereClause}
-      ORDER BY al.created_at DESC
-      LIMIT ? OFFSET ?
-    `;
-    params.push(limitInt, offset);
-
-    db.all(dataQuery, params, (err, rows) => {
+  let countQuery = `SELECT COUNT(*) as total FROM activity_logs al`;
+  if (whereClause) {
+    countQuery += ` ${whereClause}`;
+  }
+  const countResult = await new Promise((resolve, reject) => {
+    pool.query(countQuery, params, (err, result) => {
       if (err) {
-        return res.status(500).json({ error: err.message });
+        reject(err);
+      } else {
+        resolve(result.rows[0]);
       }
-
-      const logs = rows.map(row => ({
-        ...row,
-        old_value: row.old_value ? JSON.parse(row.old_value) : null,
-        new_value: row.new_value ? JSON.parse(row.new_value) : null
-      }));
-
-      res.json({
-        items: logs,
-        total,
-        page: parseInt(page),
-        limit: limitInt,
-        totalPages: Math.ceil(total / limitInt)
-      });
     });
+  });
+  const total = countResult.total;
+
+  // Get paginated logs with user info
+  const dataQuery = `
+       SELECT
+         al.*,
+         u.username
+       FROM activity_logs al
+       LEFT JOIN users u ON al.user_id = u.id
+       ${whereClause}
+       ORDER BY al.created_at DESC
+       LIMIT $1 OFFSET $2
+     `;
+
+  // Add limit and offset to params for the query
+  const queryParams = [...params, limitInt, offset];
+  const dataResult = await new Promise((resolve, reject) => {
+    pool.query(dataQuery, queryParams, (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result);
+      }
+    });
+  });
+
+  const logs = dataResult.rows.map(row => ({
+    ...row,
+    old_value: row.old_value ? JSON.parse(row.old_value) : null,
+    new_value: row.new_value ? JSON.parse(row.new_value) : null
+  }));
+
+  res.json({
+    items: logs,
+    total,
+    page: parseInt(page),
+    limit: limitInt,
+    totalPages: Math.ceil(total / limitInt)
   });
 });
 
 // Export activity logs to CSV
-app.get('/api/activity-logs/export', authenticateTokenWithSession, (req, res) => {
+app.get('/api/activity-logs/export', authenticateTokenWithSession, async (req, res) => {
   const { dateFrom, dateTo } = req.query;
 
   const conditions = [];
@@ -2069,50 +1976,61 @@ app.get('/api/activity-logs/export', authenticateTokenWithSession, (req, res) =>
     ORDER BY al.created_at DESC
   `;
 
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-
-    const headers = ['ID', 'User', 'Action', 'Entity Type', 'Entity ID', 'IP Address', 'Date'];
-    const csvRows = [];
-    csvRows.push(headers.join(','));
-
-    rows.forEach(log => {
-      const values = [
-        log.id,
-        `"${(log.username || 'System').replace(/"/g, '""')}"`,
-        log.action,
-        log.entity_type,
-        log.entity_id || '',
-        log.ip_address || '',
-        log.created_at
-      ];
-      csvRows.push(values.join(','));
+  const exportResult = await new Promise((resolve, reject) => {
+    pool.query(query, params, (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result);
+      }
     });
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="activity-logs-${new Date().toISOString().split('T')[0]}.csv"`);
-    res.send(csvRows.join('\n'));
   });
+
+  const rows = exportResult.rows;
+
+  const headers = ['ID', 'User', 'Action', 'Entity Type', 'Entity ID', 'IP Address', 'Date'];
+  const csvRows = [];
+  csvRows.push(headers.join(','));
+
+  rows.forEach(log => {
+    const values = [
+      log.id,
+      `"${(log.username || 'System').replace(/"/g, '""')}"`,
+      log.action,
+      log.entity_type,
+      log.entity_id || '',
+      log.ip_address || '',
+      log.created_at
+    ];
+
+    csvRows.push(values.join(','));
+  });
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="activity-logs-${new Date().toISOString().split('T')[0]}.csv"`);
+  res.send(csvRows.join('\n'));
 });
 
 // Cleanup old activity logs
-app.delete('/api/activity-logs/cleanup', authenticateTokenWithSession, (req, res) => {
+app.delete('/api/activity-logs/cleanup', authenticateTokenWithSession, async (req, res) => {
   const days = parseInt(req.query.days) || 90;
-
-  db.run(
-    `DELETE FROM activity_logs WHERE created_at < datetime('now', '-${days} days')`,
-    function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
+  const deleteResult = await new Promise((resolve, reject) => {
+    pool.query(
+      `DELETE FROM activity_logs WHERE created_at < NOW() - INTERVAL '${days} days'`,
+      (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
       }
-      res.json({
-        message: `Deleted ${this.changes} old log entries`,
-        deletedCount: this.changes
-      });
-    }
-  );
+    );
+  });
+
+  res.json({
+    message: `Deleted ${deleteResult.rowCount} old log entries`,
+    deletedCount: deleteResult.rowCount
+  });
 });
 
 // ==================== MEDIA API ====================
@@ -2122,13 +2040,13 @@ app.get('/api/media', authenticateTokenWithSession, async (req, res) => {
   const uniqueImages = new Map();
 
   // 1. Get images from media table (uploaded directly to media library)
-  const mediaFromDb = await new Promise((resolve) => {
-    db.all('SELECT * FROM media ORDER BY uploaded_at DESC', [], (err, rows) => {
+  const mediaFromDb = await new Promise((resolve, reject) => {
+    pool.query('SELECT * FROM media ORDER BY uploaded_at DESC', (err, result) => {
       if (err) {
         console.error('Error fetching media from DB:', err);
         resolve([]);
       } else {
-        resolve(rows || []);
+        resolve(result.rows || []);
       }
     });
   });
@@ -2146,13 +2064,13 @@ app.get('/api/media', authenticateTokenWithSession, async (req, res) => {
   });
 
   // 2. Get images from products (that might not be in media table)
-  const mediaFromProducts = await new Promise((resolve) => {
-    db.all("SELECT DISTINCT image, created_at FROM products WHERE image IS NOT NULL AND image != '' ORDER BY created_at DESC", [], (err, rows) => {
+  const mediaFromProducts = await new Promise((resolve, reject) => {
+    pool.query("SELECT DISTINCT image, created_at FROM products WHERE image IS NOT NULL AND image != '' ORDER BY created_at DESC", (err, result) => {
       if (err) {
         console.error('Error fetching media from products:', err);
         resolve([]);
       } else {
-        resolve(rows || []);
+        resolve(result.rows || []);
       }
     });
   });
@@ -2218,9 +2136,14 @@ app.get('/api/media', authenticateTokenWithSession, async (req, res) => {
   // Get product counts for each image
   const finalList = await Promise.all(
     Array.from(uniqueImages.values()).map(async (media) => {
-      const productCount = await new Promise((resolve) => {
-        db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [media.path], (err, row) => {
-          resolve(row ? row.count : 0);
+      const productCount = await new Promise((resolve, reject) => {
+        pool.query('SELECT COUNT(*) as count FROM products WHERE image = $1', [media.path], (err, result) => {
+          if (err) {
+            console.error('Error counting products for image:', err);
+            resolve(0);
+          } else {
+            resolve(result.rows[0]?.count || 0);
+          }
         });
       });
       return { ...media, product_count: productCount };
@@ -2231,95 +2154,133 @@ app.get('/api/media', authenticateTokenWithSession, async (req, res) => {
 });
 
 // Delete media file
-app.delete('/api/media/:id', authenticateTokenWithSession, (req, res) => {
+app.delete('/api/media/:id', authenticateTokenWithSession, async (req, res) => {
   const id = parseInt(req.params.id);
 
   // Check if this is a product image (ID >= 10000)
   if (id >= 10000) {
     // Get all distinct product images
-    db.all("SELECT DISTINCT image FROM products WHERE image IS NOT NULL AND image != '' ORDER BY created_at", [], (err, rows) => {
-      if (err || !rows) {
-        return res.status(404).json({ error: 'Media not found' });
-      }
-      
-      // Calculate the index from ID
-      const index = id - 10000;
-      
-      // Build unique images map like in GET
-      const uniqueImages = new Map();
-      rows.forEach(row => {
-        if (row.image) {
-          uniqueImages.set(row.image, true);
-        }
-      });
-      
-      const imagesList = Array.from(uniqueImages.keys());
-      
-      if (index < 0 || index >= imagesList.length) {
-        return res.status(404).json({ error: 'Media not found' });
-      }
-      
-      const imagePath = imagesList[index];
-      if (!imagePath) {
-        return res.status(404).json({ error: 'Media not found' });
-      }
-      
-      // Check if other products use this image
-      db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
+    const rows = await new Promise((resolve, reject) => {
+      pool.query("SELECT DISTINCT image FROM products WHERE image IS NOT NULL AND image != '' ORDER BY created_at", (err, result) => {
         if (err) {
-          return res.status(500).json({ error: err.message });
+          console.error('Error fetching distinct product images:', err);
+          reject(err);
+        } else {
+          resolve(result.rows || []);
         }
-        if (row && row.count > 0) {
-          return res.status(400).json({ error: `Cannot delete image used by ${row.count} product(s). Remove from products first.` });
-        }
-        
-        // Update the product to remove this image
-        db.run("UPDATE products SET image = NULL WHERE image = ?", [imagePath], (err) => {
-          if (err) {
-            return res.status(500).json({ error: err.message });
-          }
-          res.json({ message: 'Media deleted successfully' });
-        });
       });
     });
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Media not found' });
+    }
+
+    // Calculate the index from ID
+    const index = id - 10000;
+
+    // Build unique images map like in GET
+    const uniqueImages = new Map();
+    rows.forEach(row => {
+      if (row.image) {
+        uniqueImages.set(row.image, true);
+      }
+    });
+
+    const imagesList = Array.from(uniqueImages.keys());
+
+    if (index < 0 || index >= imagesList.length) {
+      return res.status(404).json({ error: 'Media not found' });
+    }
+
+    const imagePath = imagesList[index];
+    if (!imagePath) {
+      return res.status(404).json({ error: 'Media not found' });
+    }
+
+    // Check if other products use this image
+    const productCountResult = await new Promise((resolve, reject) => {
+      pool.query('SELECT COUNT(*) as count FROM products WHERE image = $1', [imagePath], (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result.rows[0]);
+        }
+      });
+    });
+
+    if (productCountResult && productCountResult.count > 0) {
+      return res.status(400).json({ error: `Cannot delete image used by ${productCountResult.count} product(s). Remove from products first.` });
+    }
+
+    // Update the product to remove this image
+    await new Promise((resolve, reject) => {
+      pool.query("UPDATE products SET image = NULL WHERE image = $1", [imagePath], (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      });
+    });
+
+    res.json({ message: 'Media deleted successfully' });
     return;
   }
 
   // Media from media table
-  db.get('SELECT * FROM media WHERE id = ?', [id], (err, media) => {
-    if (err || !media) {
-      return res.status(404).json({ error: 'Media not found' });
-    }
-
-    // Check if file is used by any product
-    db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [media.path], (err, row) => {
+  const mediaResult = await new Promise((resolve, reject) => {
+    pool.query('SELECT * FROM media WHERE id = $1', [id], (err, result) => {
       if (err) {
-        return res.status(500).json({ error: err.message });
+        reject(err);
+      } else {
+        resolve(result.rows[0]);
       }
-      if (row && row.count > 0) {
-        return res.status(400).json({ error: `Cannot delete image used by ${row.count} product(s). Remove from products first.` });
-      }
-
-      // Delete from media table
-      db.run('DELETE FROM media WHERE id = ?', [id], (err) => {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-
-        if (!media.path.startsWith('http')) {
-          const filePath = path.join(__dirname, 'uploads', media.filename);
-          fs.unlink(filePath, (err) => {
-            if (err && err.code !== 'ENOENT') {
-              console.error('Error deleting local file:', err);
-            }
-          });
-        }
-
-        logActivity(req, 'delete', 'media', null, { filename: media.filename, path: media.path }, null);
-        res.json({ message: 'Media deleted successfully' });
-      });
     });
   });
+
+  if (!mediaResult) {
+    return res.status(404).json({ error: 'Media not found' });
+  }
+
+  const media = mediaResult;
+
+  // Check if file is used by any product
+  const productCountResult = await new Promise((resolve, reject) => {
+    pool.query('SELECT COUNT(*) as count FROM products WHERE image = $1', [media.path], (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result.rows[0]);
+      }
+    });
+  });
+
+  if (productCountResult && productCountResult.count > 0) {
+    return res.status(400).json({ error: `Cannot delete image used by ${productCountResult.count} product(s). Remove from products first.` });
+  }
+
+  // Delete from media table
+  await new Promise((resolve, reject) => {
+    pool.query('DELETE FROM media WHERE id = $1', [id], (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result);
+      }
+    });
+  });
+
+  if (!media.path.startsWith('http')) {
+    const filePath = path.join(__dirname, 'uploads', media.filename);
+    fs.unlink(filePath, (err) => {
+      if (err && err.code !== 'ENOENT') {
+        console.error('Error deleting local file:', err);
+      }
+    });
+  }
+
+  logActivity(req, 'delete', 'media', null, { filename: media.filename, path: media.path }, null);
+  res.json({ message: 'Media deleted successfully' });
 });
 
 // Upload media (bulk) - using the shared upload config
@@ -2335,7 +2296,7 @@ app.post('/api/media/upload', authenticateTokenWithSession, (req, res) => {
 
     // Save to database and return saved records
     const uploadedFiles = [];
-    
+
     for (const file of req.files) {
       let filePath;
       if (isS3Configured() && isSupabase() && file.key) {
@@ -2350,19 +2311,29 @@ app.post('/api/media/upload', authenticateTokenWithSession, (req, res) => {
       }
 
       const filename = file.key || file.filename;
-      
+
       // Insert into media table
-      await new Promise((resolve) => {
-        db.run(
-          'INSERT INTO media (filename, path, size, uploaded_at) VALUES (?, ?, ?, ?)',
+      const result = await new Promise((resolve, reject) => {
+        pool.query(
+          'INSERT INTO media (filename, path, size, uploaded_at) VALUES ($1, $2, $3, $4) RETURNING *',
           [filename, filePath, file.size, new Date().toISOString()],
-          function(err) {
+          (err, result) => {
             if (err) {
-              console.error('Error saving media to database:', err);
+              reject(err);
+            } else {
+              resolve(result);
             }
-            resolve();
           }
         );
+      });
+
+      uploadedFiles.push({
+        id: result.rows[0].id,
+        filename: filename,
+        path: filePath,
+        size: file.size,
+        size_formatted: formatBytes(file.size),
+        uploaded_at: result.rows[0].uploaded_at
       });
 
       uploadedFiles.push({
@@ -2412,8 +2383,8 @@ app.get('/api/media/unused', authenticateTokenWithSession, (req, res) => {
 
     const checkUsage = (filename) => {
       const imagePath = `/uploads/${filename}`;
-      db.get('SELECT COUNT(*) as count FROM products WHERE image = ?', [imagePath], (err, row) => {
-        if (!err && (!row || row.count === 0)) {
+      pool.query('SELECT COUNT(*) as count FROM products WHERE image = $1', [imagePath], (err, result) => {
+        if (!err && (!result.rows[0] || result.rows[0].count === 0)) {
           unusedFiles.push(filename);
         }
         checked++;

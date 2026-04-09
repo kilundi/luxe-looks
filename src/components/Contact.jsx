@@ -1,6 +1,15 @@
 import { motion } from 'framer-motion';
 import { Phone, Mail, MessageCircle, MapPin, Heart, Video, Clock, ArrowUp } from 'lucide-react';
 
+const extractSrcFromIframe = (input) => {
+  if (!input) return '';
+  if (input.includes('<iframe')) {
+    const match = input.match(/src=["']([^"']+)["']/);
+    return match ? match[1] : input;
+  }
+  return input;
+};
+
 const Contact = ({ siteSettings }) => {
   const {
     phone_number = '',
@@ -339,7 +348,7 @@ const Contact = ({ siteSettings }) => {
             {map_embed_contact ? (
               <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
                 <iframe
-                  src={map_embed_contact}
+                  src={extractSrcFromIframe(map_embed_contact)}
                   width="100%"
                   height="450"
                   style={{ border: 0 }}
