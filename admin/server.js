@@ -58,9 +58,58 @@ function validatePasswordStrength(password) {
   };
 }
 
+const PORT = process.env.PORT || 3001;
+
 // Middleware
 app.use(cors());
-app.use(express.json());
+
+// Security headers (helmet)
+app.use(helmet({
+  contentSecurityPolicy: false,
+}));
+
+// Rate limiting for API endpoints
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10, // stricter limit for auth endpoints
+  message: { error: 'Too many login attempts, please try again later' },
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/login', authLimiter);
+app.use('/api/register', authLimiter);
+
+// Request logging for production
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (process.env.NODE_ENV === 'production') {
+      console.log(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+    }
+  });
+  next();
+});
+
+app.use(express.json({ limit: '10mb' }));
+
+// Serve main frontend static files (from luxe-looks/dist)
+const frontendPath = path.join(__dirname, '../luxe-looks/dist');
+if (fs.existsSync(frontendPath)) {
+  app.use(express.static(frontendPath));
+  // Serve frontend index.html for all non-API routes (SPA fallback)
+  app.get(/^(?!\/api\/).*/, (req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+  });
+}
 
 // Serve admin assets (JS/CSS)
 app.use('/admin/assets', express.static(path.join(__dirname, 'dist/assets')));
@@ -1419,8 +1468,8 @@ app.get('/api/dashboard/stats', authenticateTokenWithSession, async (req, res) =
     // PostgreSQL returns lowercase column names
     const currentTotalProducts = parseInt(data.currenttotalproducts) || 0;
     const previousTotalProducts = parseInt(data.previoustotalproducts) || 0;
-    const productsChange = previousTotalProducts > 0 
-      ? ((currentTotalProducts - previousTotalProducts) / previousTotalProducts) * 100 
+    const productsChange = previousTotalProducts > 0
+      ? ((currentTotalProducts - previousTotalProducts) / previousTotalProducts) * 100
       : (currentTotalProducts > 0 ? 100 : 0);
 
     const currentTotalCategories = parseInt(data.currenttotalcategories) || 0;
@@ -1679,11 +1728,11 @@ app.get('/api/reviews/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('SELECT * FROM reviews WHERE id = $1', [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Review not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -1702,7 +1751,7 @@ app.post('/api/reviews', authenticateTokenWithSession, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO reviews (name, location, rating, text, is_verified, avatar, sort_order, is_active)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [name, location || null, rating || 5, text, is_verified !== undefined ? is_verified : true, avatar || name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0,2), sort_order || 0, is_active !== undefined ? is_active : true]
+      [name, location || null, rating || 5, text, is_verified !== undefined ? is_verified : true, avatar || name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2), sort_order || 0, is_active !== undefined ? is_active : true]
     );
     const newReview = result.rows[0];
     logActivity(req, 'create', 'review', newReview.id, null, newReview);
@@ -2564,9 +2613,43 @@ app.get('/admin/*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+// ==================== PRODUCTION IMPROVEMENTS ====================
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Server error:', err.stack);
+  res.status(500).json({ 
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message 
+  });
+});
+
+// Graceful shutdown
+const gracefulShutdown = () => {
+  console.log('Shutting down gracefully...');
+  pool.end(() => {
+    console.log('Database connections closed');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
 // Start server
-app.listen(PORT, () => {
-  console.log(`Admin server running on http://localhost:${PORT}`);
+const isProduction = process.env.NODE_ENV === 'production';
+const server = app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Environment: ${isProduction ? 'production' : 'development'}`);
+  console.log(`API: http://localhost:${PORT}/api`);
+  console.log(`Admin: http://localhost:${PORT}/admin`);
+});
+
+module.exports = app;
   console.log(`API endpoint: http://localhost:${PORT}/api/products`);
   console.log(`Admin panel: http://localhost:${PORT}/admin`);
 });
